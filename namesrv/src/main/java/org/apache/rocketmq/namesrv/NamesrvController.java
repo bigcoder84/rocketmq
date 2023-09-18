@@ -77,6 +77,7 @@ public class NamesrvController {
 
         this.kvConfigManager.load();
 
+        // 初始化Netty信息，会在后序流程启动Netty
         this.remotingServer = new NettyRemotingServer(this.nettyServerConfig, this.brokerHousekeepingService);
 
         this.remotingExecutor =
@@ -84,6 +85,8 @@ public class NamesrvController {
 
         this.registerProcessor();
 
+        // 定时任务，每隔10s会扫描一次brokerLiveTable（存放心跳包的时间戳信息），如果在120s内没有收到心跳包，
+        // 则认为Broker失效，更新topic的路由信息，将失效的Broker信息移除
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -92,6 +95,7 @@ public class NamesrvController {
             }
         }, 5, 10, TimeUnit.SECONDS);
 
+        // 每隔10s打印一次KV配置
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override

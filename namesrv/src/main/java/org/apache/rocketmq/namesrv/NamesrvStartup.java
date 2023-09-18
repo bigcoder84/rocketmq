@@ -83,6 +83,8 @@ public class NamesrvStartup {
         final NettyServerConfig nettyServerConfig = new NettyServerConfig();
         nettyServerConfig.setListenPort(9876);
         if (commandLine.hasOption('c')) {
+            // 判断是否有 -c 启动参数，指定配置文件位置
+            // 获取配置的文件地址
             String file = commandLine.getOptionValue('c');
             if (file != null) {
                 InputStream in = new BufferedInputStream(new FileInputStream(file));
@@ -143,9 +145,11 @@ public class NamesrvStartup {
             System.exit(-3);
         }
 
+        // 注册 JVM钩子函数，在JVM进程关闭之前，会执行钩子函数
         Runtime.getRuntime().addShutdownHook(new ShutdownHookThread(log, new Callable<Void>() {
             @Override
             public Void call() throws Exception {
+                // 关闭线程池、Netty服务等
                 controller.shutdown();
                 return null;
             }

@@ -887,6 +887,8 @@ public class BrokerController {
             this.registerBrokerAll(true, false, true);
         }
 
+        // 定时任务，每30秒向所有NameServer发送心跳，NameServer中会记录每一个Broker最近心跳时间，
+        // NameServer每10秒会扫描所有Broker的心跳时间，如果NameServer超过120秒未收到心跳，则会将Broker剔除。
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
 
             @Override
@@ -928,6 +930,12 @@ public class BrokerController {
         doRegisterBrokerAll(true, false, topicConfigSerializeWrapper);
     }
 
+    /**
+     * 该方法遍历NameServer列表，Broker消息服务器依次向NameServer发送心跳包，如代码清单2-9所示
+     * @param checkOrderConfig
+     * @param oneway
+     * @param forceRegister
+     */
     public synchronized void registerBrokerAll(final boolean checkOrderConfig, boolean oneway, boolean forceRegister) {
         TopicConfigSerializeWrapper topicConfigWrapper = this.getTopicConfigManager().buildTopicConfigSerializeWrapper();
 
