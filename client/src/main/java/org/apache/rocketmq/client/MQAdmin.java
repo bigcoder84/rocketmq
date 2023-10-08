@@ -27,6 +27,7 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
  */
 public interface MQAdmin {
     /**
+     * 创建主题
      * Creates an topic
      *
      * @param key accesskey
@@ -48,6 +49,7 @@ public interface MQAdmin {
         throws MQClientException;
 
     /**
+     * 根据时间戳从队列中查找其偏移量
      * Gets the message queue offset according to some time in milliseconds<br>
      * be cautious to call because of more IO overhead
      *
@@ -58,6 +60,7 @@ public interface MQAdmin {
     long searchOffset(final MessageQueue mq, final long timestamp) throws MQClientException;
 
     /**
+     * 查找该消息队列中最大的物理偏移量
      * Gets the max offset
      *
      * @param mq Instance of MessageQueue
@@ -66,6 +69,7 @@ public interface MQAdmin {
     long maxOffset(final MessageQueue mq) throws MQClientException;
 
     /**
+     * 查找该消息队列中的最小物理偏移量。
      * Gets the minimum offset
      *
      * @param mq Instance of MessageQueue
@@ -82,6 +86,7 @@ public interface MQAdmin {
     long earliestMsgStoreTime(final MessageQueue mq) throws MQClientException;
 
     /**
+     * 根据消息偏移量查找消息。
      * Query message according to message id
      *
      * @param offsetMsgId message id
@@ -91,6 +96,7 @@ public interface MQAdmin {
         InterruptedException, MQClientException;
 
     /**
+     * 根据条件查询消息
      * Query messages
      *
      * @param topic message topic
@@ -104,6 +110,7 @@ public interface MQAdmin {
         final long end) throws MQClientException, InterruptedException;
 
     /**
+     * 根据主题与消息ID查找消息。
      * @return The {@code MessageExt} of given msgId
      */
     MessageExt viewMessage(String topic,

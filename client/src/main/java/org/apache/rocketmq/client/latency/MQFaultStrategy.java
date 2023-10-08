@@ -26,6 +26,18 @@ public class MQFaultStrategy {
     private final static InternalLogger log = ClientLogger.getLog();
     private final LatencyFaultTolerance<String> latencyFaultTolerance = new LatencyFaultToleranceImpl();
 
+    /**
+     * 是否启用Broker故障延迟机制
+     * 开启与不开启sendLatencyFaultEnable机制在消息发送时都能规避故
+     * 障的Broker，那么这两种机制有何区别呢？
+     *
+     * 开启所谓的故障延迟机制，即设置sendLatencyFaultEnable为ture，
+     * 其实是一种较为悲观的做法。当消息发送者遇到一次消息发送失败
+     * 后，就会悲观地认为Broker不可用，在接下来的一段时间内就不再向
+     * 其发送消息，直接避开该Broker。而不开启延迟规避机制，就只会在
+     * 本次消息发送的重试过程中规避该Broker，下一次消息发送还是会继
+     * 续尝试。
+     */
     private boolean sendLatencyFaultEnable = false;
 
     private long[] latencyMax = {50L, 100L, 550L, 1000L, 2000L, 3000L, 15000L};
@@ -57,13 +69,16 @@ public class MQFaultStrategy {
 
     public MessageQueue selectOneMessageQueue(final TopicPublishInfo tpInfo, final String lastBrokerName) {
         if (this.sendLatencyFaultEnable) {
+            // 如果开启了故障延迟机制
             try {
                 int index = tpInfo.getSendWhichQueue().getAndIncrement();
                 for (int i = 0; i < tpInfo.getMessageQueueList().size(); i++) {
                     int pos = Math.abs(index++) % tpInfo.getMessageQueueList().size();
                     if (pos < 0)
                         pos = 0;
+                    // 获取一个消息队列
                     MessageQueue mq = tpInfo.getMessageQueueList().get(pos);
+                    // 验证该消息队列是否可用
                     if (latencyFaultTolerance.isAvailable(mq.getBrokerName())) {
                         if (null == lastBrokerName || mq.getBrokerName().equals(lastBrokerName))
                             return mq;
@@ -80,6 +95,7 @@ public class MQFaultStrategy {
                     }
                     return mq;
                 } else {
+                    // 移除失败条目，意味着Broker重新参与路由计算
                     latencyFaultTolerance.remove(notBestBroker);
                 }
             } catch (Exception e) {
@@ -88,7 +104,7 @@ public class MQFaultStrategy {
 
             return tpInfo.selectOneMessageQueue();
         }
-
+        // 未开启故障延迟机制
         return tpInfo.selectOneMessageQueue(lastBrokerName);
     }
 

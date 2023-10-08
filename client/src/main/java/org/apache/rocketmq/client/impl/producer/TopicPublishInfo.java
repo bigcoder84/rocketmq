@@ -24,10 +24,23 @@ import org.apache.rocketmq.common.protocol.route.QueueData;
 import org.apache.rocketmq.common.protocol.route.TopicRouteData;
 
 public class TopicPublishInfo {
+
+    /**
+     * 是否是顺序消息
+     */
     private boolean orderTopic = false;
     private boolean haveTopicRouterInfo = false;
+    /**
+     * 该Topic的队列信息
+     */
     private List<MessageQueue> messageQueueList = new ArrayList<MessageQueue>();
+    /**
+     * 每选择一次消息队列，该值会自增1，如果超过Integer.MAX_VALUE，则重置为0，用于选择消息队列。
+     */
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
+    /**
+     * Topic路由相关信息
+     */
     private TopicRouteData topicRouteData;
 
     public boolean isOrderTopic() {
@@ -68,8 +81,14 @@ public class TopicPublishInfo {
 
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
         if (lastBrokerName == null) {
+            // 在消息发送过程中，可能会多次执行选择消息队列这个方法，
+            //lastBrokerName就是上一次选择的执行发送消息失败的Broker。第一
+            //次执行消息队列选择时，lastBrokerName为null，此时直接用
+            //sendWhichQueue自增再获取值，与当前路由表中消息队列的个数取
+            //模，返回该位置的MessageQueue(selectOneMessageQueue()方法
             return selectOneMessageQueue();
         } else {
+            //如果消息发送失败，下次进行消息队列选择时规避上次MesageQueue所在的Broker，否则有可能再次失败。
             int index = this.sendWhichQueue.getAndIncrement();
             for (int i = 0; i < this.messageQueueList.size(); i++) {
                 int pos = Math.abs(index++) % this.messageQueueList.size();
@@ -80,10 +99,15 @@ public class TopicPublishInfo {
                     return mq;
                 }
             }
+            // 如果没有找到其它broker上的队列，则降级为默认逻辑，轮询获取下一个队列信息。
             return selectOneMessageQueue();
         }
     }
 
+    /**
+     * 轮询选择消息队列
+     * @return
+     */
     public MessageQueue selectOneMessageQueue() {
         int index = this.sendWhichQueue.getAndIncrement();
         int pos = Math.abs(index) % this.messageQueueList.size();

@@ -78,6 +78,8 @@ public class Validators {
     }
 
     /**
+     * 验证消息是否符合相应的规范。具体的规范要求是主题名称、消息体不能为空，
+     * 消息长度不能等于0且默认不能超过允许发送消息的最大长度4MB（maxMessageSize=1024×1024×4）
      * Validate message
      */
     public static void checkMessage(Message msg, DefaultMQProducer defaultMQProducer)
@@ -89,10 +91,12 @@ public class Validators {
         Validators.checkTopic(msg.getTopic());
 
         // body
+        // 消息不能为空
         if (null == msg.getBody()) {
             throw new MQClientException(ResponseCode.MESSAGE_ILLEGAL, "the message body is null");
         }
 
+        // 校验消息长度
         if (0 == msg.getBody().length) {
             throw new MQClientException(ResponseCode.MESSAGE_ILLEGAL, "the message body length is zero");
         }
