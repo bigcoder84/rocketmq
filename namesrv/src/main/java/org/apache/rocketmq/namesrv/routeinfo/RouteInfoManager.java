@@ -790,6 +790,10 @@ public class RouteInfoManager {
 }
 
 class BrokerLiveInfo {
+
+    /**
+     * 最近一次心跳上报的时间
+     */
     private long lastUpdateTimestamp;
     private DataVersion dataVersion;
     private Channel channel;

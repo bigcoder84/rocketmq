@@ -25,9 +25,28 @@ import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.store.config.BrokerRole;
 import org.apache.rocketmq.store.config.StorePathConfigHelper;
 
+/**
+ * RocketMQ基于主题订阅模式实现消息消费，消费者关心的是一个
+ * 主题下的所有消息，但同一主题的消息是不连续地存储在CommitLog文
+ * 件中的。如果消息消费者直接从消息存储文件中遍历查找订阅主题下
+ * 的消息，效率将极其低下。RocketMQ为了适应消息消费的检索需求，
+ * 设计了ConsumeQueue文件，该文件可以看作CommitLog关于消息消费的
+ * “索引”文件，ConsumeQueue的第一级目录为消息主题，第二级目录
+ * 为主题的消息队列。
+ * $HOME/store/consumequeue/{topic}/{queueId}/{fileName}
+ *
+ * ConsumeQueue 的设计极具技巧，每个条目长度固定（8字节CommitLog物理偏移量、
+ * 4字节消息长度、8字节tag哈希码）。这里不是存储tag的原始字符串，而是存储哈希码，
+ * 目的是确保每个条目的长度固定，可以使用访问类似数组下标的方式快速定位条目，
+ * 极大地提高了ConsumeQueue文件的读取性能。
+ */
 public class ConsumeQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
 
+    /**
+     * ConsumeQueue文件中每一个条目是固定长度 20字节
+     * 8字节 CommitLog偏移量 + 4字节消息长度 + 8字节 Tag Hash码
+     */
     public static final int CQ_STORE_UNIT_SIZE = 20;
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
@@ -152,6 +171,11 @@ public class ConsumeQueue {
         }
     }
 
+    /**
+     * 根据消息存储时间来查找具体消息的下标
+     * @param timestamp
+     * @return
+     */
     public long getOffsetInQueueByTime(final long timestamp) {
         MappedFile mappedFile = this.mappedFileQueue.getMappedFileByTime(timestamp);
         if (mappedFile != null) {
@@ -376,6 +400,10 @@ public class ConsumeQueue {
         return this.minLogicOffset / CQ_STORE_UNIT_SIZE;
     }
 
+    /**
+     * 将 CommitLog 分发存储到 ConsumeQueue中，只有执行该方法后，才会将CommitLog索引信息存到ConsumeQueue中，这样消费者才能消费到这条消息
+     * @param request
+     */
     public void putMessagePositionInfoWrapper(DispatchRequest request) {
         final int maxRetries = 30;
         boolean canWrite = this.defaultMessageStore.getRunningFlags().isCQWriteable();
@@ -395,6 +423,7 @@ public class ConsumeQueue {
                         topic, queueId, request.getCommitLogOffset());
                 }
             }
+            // 执行分发操作
             boolean result = this.putMessagePositionInfo(request.getCommitLogOffset(),
                 request.getMsgSize(), tagsCode, request.getConsumeQueueOffset());
             if (result) {
@@ -429,11 +458,14 @@ public class ConsumeQueue {
             log.warn("Maybe try to build consume queue repeatedly maxPhysicOffset={} phyOffset={}", maxPhysicOffset, offset);
             return true;
         }
-
+        // 切换读写模式
         this.byteBufferIndex.flip();
         this.byteBufferIndex.limit(CQ_STORE_UNIT_SIZE);
+        // 设置消息在CommitLog中的物理偏移量
         this.byteBufferIndex.putLong(offset);
+        // 设置消息长度
         this.byteBufferIndex.putInt(size);
+        // 设置消息 Tag Hash码
         this.byteBufferIndex.putLong(tagsCode);
 
         final long expectLogicOffset = cqOffset * CQ_STORE_UNIT_SIZE;
@@ -471,6 +503,7 @@ public class ConsumeQueue {
                 }
             }
             this.maxPhysicOffset = offset + size;
+            // 追加到 ConsumeQueue 文件
             return mappedFile.appendMessage(this.byteBufferIndex.array());
         }
         return false;
@@ -488,6 +521,16 @@ public class ConsumeQueue {
         }
     }
 
+    /**
+     * 根据startIndex获取消息消费队列条目。通过startIndex×20得
+     * 到在ConsumeQueue文件的物理偏移量，如果该偏移量小于
+     * minLogicOffset，则返回null，说明该消息已被删除，如果大于
+     * minLogicOffset，则根据偏移量定位到具体的物理文件。通过将该偏
+     * 移量与物理文件的大小取模获取在该文件的偏移量，从偏移量开始连
+     * 续读取20个字节即可。
+     * @param startIndex
+     * @return
+     */
     public SelectMappedBufferResult getIndexBuffer(final long startIndex) {
         int mappedFileSize = this.mappedFileSize;
         long offset = startIndex * CQ_STORE_UNIT_SIZE;

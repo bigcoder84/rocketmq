@@ -29,12 +29,29 @@ public class IndexHeader {
     private static int hashSlotcountIndex = 32;
     private static int indexCountIndex = 36;
     private final ByteBuffer byteBuffer;
+    /**
+     * Index文件中消息的最小存储时间
+     */
     private AtomicLong beginTimestamp = new AtomicLong(0);
+    /**
+     * Index文件中消息的最大存储时间。
+     */
     private AtomicLong endTimestamp = new AtomicLong(0);
+    /**
+     * Index文件中消息的最小物理偏移量（CommitLog文件偏移量）
+     */
     private AtomicLong beginPhyOffset = new AtomicLong(0);
+    /**
+     * Index文件中消息的最大物理偏移量（CommitLog文件偏移量）。
+     */
     private AtomicLong endPhyOffset = new AtomicLong(0);
     private AtomicInteger hashSlotCount = new AtomicInteger(0);
-
+    /**
+     * Index条目列表当前已使用的个数，Index条目在Index条目列表中按顺序存储。
+     * 一个Index默认包含500万个哈希槽。哈希槽存储的是落在该哈希
+     * 槽的哈希码最新的Index索引。默认一个Index文件包含2000万个条
+     * 目
+     */
     private AtomicInteger indexCount = new AtomicInteger(1);
 
     public IndexHeader(final ByteBuffer byteBuffer) {

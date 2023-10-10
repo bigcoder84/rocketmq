@@ -29,21 +29,47 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
+/**
+ * RocketMQ通过使用内存映射文件来提高I/O访问性能，无论是
+ * CommitLog、Consume-Queue还是Index，单个文件都被设计为固定长
+ * 度，一个文件写满以后再创建新文件，文件名就为该文件第一条消息
+ * 对应的全局物理偏移量。
+ * RocketMQ使用MappedFile、MappedFileQueue来封装存储文件。
+ *
+ * MappedFileQueue是MappedFile的管理容器，MappedFileQueue对
+ * 存储目录进行封装，
+ *
+ * 例如CommitLog文件的存储场景下，存储路径为${ROCKET_HOME}/store/commitlog/，
+ * 该目录下会存在多个内存映射文件MappedFile
+ */
 public class MappedFileQueue {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
     private static final InternalLogger LOG_ERROR = InternalLoggerFactory.getLogger(LoggerName.STORE_ERROR_LOGGER_NAME);
 
     private static final int DELETE_FILES_BATCH_MAX = 10;
-
+    /**
+     * 存储目录
+     */
     private final String storePath;
-
+    /**
+     * 单个文件的存储大小
+     */
     private final int mappedFileSize;
-
+    /**
+     * MappedFile集合
+     */
     private final CopyOnWriteArrayList<MappedFile> mappedFiles = new CopyOnWriteArrayList<MappedFile>();
-
+    /**
+     * 创建MappedFile服务类
+     */
     private final AllocateMappedFileService allocateMappedFileService;
-
+    /**
+     * 当前刷盘指针，表示该指针之前的所有数据全部持久化到磁盘
+     */
     private long flushedWhere = 0;
+    /**
+     * 当前数据提交指针，内存中ByteBuffer当前的写指针，该值大于、等于flushedWhere
+     */
     private long committedWhere = 0;
 
     private volatile long storeTimestamp = 0;
@@ -74,6 +100,13 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 根据消息存储时间戳查找MappdFile。从MappedFile列表中第一个
+     * 文件开始查找，找到第一个最后一次更新时间大于待查找时间戳的文
+     * 件，如果不存在，则返回最后一个MappedFile
+     * @param timestamp
+     * @return
+     */
     public MappedFile getMappedFileByTime(final long timestamp) {
         Object[] mfs = this.copyMappedFiles(0);
 
@@ -101,6 +134,18 @@ public class MappedFileQueue {
         return mfs;
     }
 
+    /**
+     * 删除offset之后的所有文件。遍历目录下的文件，如果
+     * 文件的尾部偏移量小于offset则跳过该文件，如果尾部的偏移量大于
+     * offset，则进一步比较offset与文件的开始偏移量。如果offset大于
+     * 文件的起始偏移量，说明当前文件包含了有效偏移量，设置
+     * MappedFile的flushedPosition和committedPosition。如果offset小
+     * 于文件的起始偏移量，说明该文件是有效文件后面创建的，则调用
+     * MappedFile#destory方法释放MappedFile占用的内存资源（内存映射
+     * 与内存通道等），然后加入待删除文件列表中，最终调用
+     * deleteExpiredFile将文件从物理磁盘上删除
+     * @param offset
+     */
     public void truncateDirtyFiles(long offset) {
         List<MappedFile> willRemoveFiles = new ArrayList<MappedFile>();
 
@@ -144,6 +189,12 @@ public class MappedFileQueue {
         }
     }
 
+    /**
+     * 加载CommitLog文件，加载 ${ROCKET_HOME}/store/commitlog 目录下所有文件并按照文件名进行
+     * 排序。如果文件与配置文件的单个文件大小不一致，将忽略该目录下的所有文件，然后创建MappedFile对象。注意load()方法将
+     * wrotePosition、flushedPosition、committedPosition三个指针都设置为文件大小。
+     * @return
+     */
     public boolean load() {
         File dir = new File(this.storePath);
         File[] files = dir.listFiles();
@@ -152,6 +203,7 @@ public class MappedFileQueue {
             Arrays.sort(files);
             for (File file : files) {
 
+                //
                 if (file.length() != this.mappedFileSize) {
                     log.warn(file + "\t" + file.length()
                         + " length not matched message store config value, please check it manually");
@@ -285,6 +337,10 @@ public class MappedFileQueue {
         return true;
     }
 
+    /**
+     * 获取存储文件最小偏移量。
+     * @return
+     */
     public long getMinOffset() {
 
         if (!this.mappedFiles.isEmpty()) {
@@ -299,6 +355,10 @@ public class MappedFileQueue {
         return -1;
     }
 
+    /**
+     * 获取存储文件最大偏移量。
+     * @return
+     */
     public long getMaxOffset() {
         MappedFile mappedFile = getLastMappedFile();
         if (mappedFile != null) {
@@ -453,6 +513,13 @@ public class MappedFileQueue {
     }
 
     /**
+     * 根据消息偏移量offset查找MappedFile，但是不能直接使用
+     * offset%mappedFileSize。这是因为使用了内存映射，只要是存在于存
+     * 储目录下的文件，都需要对应创建内存映射文件，RocketMQ采取定时删除存储文件的策略。
+     * 也就是说，在存储文件中，第一个文件不一定是00000000000000000000，因为该文件在某一
+     * 时刻会被删除，所以根据offset定位MappedFile的算法为(int)
+     * ((offset/this.mappedFileSize)-(firstMappedFile.getFileFromOffset()/this.MappedFileSize))
+     *
      * Finds a mapped file by offset.
      *
      * @param offset Offset.
@@ -472,6 +539,7 @@ public class MappedFileQueue {
                         this.mappedFileSize,
                         this.mappedFiles.size());
                 } else {
+                    // 计算文件索引
                     int index = (int) ((offset / this.mappedFileSize) - (firstMappedFile.getFileFromOffset() / this.mappedFileSize));
                     MappedFile targetFile = null;
                     try {

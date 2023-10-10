@@ -42,27 +42,73 @@ import org.apache.rocketmq.store.util.LibC;
 import sun.nio.ch.DirectBuffer;
 
 public class MappedFile extends ReferenceResource {
+
+    /**
+     * 操作系统页大小
+     */
     public static final int OS_PAGE_SIZE = 1024 * 4;
     protected static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.STORE_LOGGER_NAME);
-
+    /**
+     * 当前JVM实例中MappedFile的虚拟内存。
+     */
     private static final AtomicLong TOTAL_MAPPED_VIRTUAL_MEMORY = new AtomicLong(0);
-
+    /**
+     * 当前JVM实例中MappedFile对象个数。
+     */
     private static final AtomicInteger TOTAL_MAPPED_FILES = new AtomicInteger(0);
+    /**
+     * 当前文件的写指针，从0开始（内存映射文件中的写指针）。
+     */
     protected final AtomicInteger wrotePosition = new AtomicInteger(0);
+    /**
+     * 当前文件的提交指针，如果开启transientStore-PoolEnable，则数据会存储在
+     * TransientStorePool中，然后提交到内存映射ByteBuffer中，再写入磁盘。
+     */
     protected final AtomicInteger committedPosition = new AtomicInteger(0);
+    /**
+     * 将该指针之前的数据持久化存储到磁盘中。
+     */
     private final AtomicInteger flushedPosition = new AtomicInteger(0);
     protected int fileSize;
+    /**
+     * 文件通道
+     */
     protected FileChannel fileChannel;
     /**
      * Message will put to here first, and then reput to FileChannel if writeBuffer is not null.
      */
+    /**
+     * 堆外内存ByteBuffer，如果不为空，数据首先将存储在该Buffer中，然后提交到MappedFile创建的
+     * FileChannel中。transientStorePoolEnable为true时不为空。
+     */
     protected ByteBuffer writeBuffer = null;
+    /**
+     * 堆外内存池，该内存池中的内存会提供内存锁机制。transientStorePoolEnable为true时启用。
+     */
     protected TransientStorePool transientStorePool = null;
+    /**
+     * 文件名称
+     */
     private String fileName;
+    /**
+     * 该文件的初始偏移量
+     */
     private long fileFromOffset;
+    /**
+     * 物理文件
+     */
     private File file;
+    /**
+     * 物理文件对应的内存映射Buffer。
+     */
     private MappedByteBuffer mappedByteBuffer;
+    /**
+     * 文件最后一次写入内容的时间
+     */
     private volatile long storeTimestamp = 0;
+    /**
+     * 是否是MappedFileQueue队列中第一个文件。
+     */
     private boolean firstCreateInQueue = false;
 
     public MappedFile() {
@@ -159,6 +205,7 @@ public class MappedFile extends ReferenceResource {
 
         try {
             this.fileChannel = new RandomAccessFile(this.file, "rw").getChannel();
+            // 创建内存映射 MappedByteBuffer
             this.mappedByteBuffer = this.fileChannel.map(MapMode.READ_WRITE, 0, fileSize);
             TOTAL_MAPPED_VIRTUAL_MEMORY.addAndGet(fileSize);
             TOTAL_MAPPED_FILES.incrementAndGet();
@@ -200,12 +247,16 @@ public class MappedFile extends ReferenceResource {
         assert messageExt != null;
         assert cb != null;
 
+        // 首先获取MappedFile当前的写指针，如果currentPos大于或等于文件大小，表明文件已写满
         int currentPos = this.wrotePosition.get();
 
         if (currentPos < this.fileSize) {
+            // 通过slice()方法创建一个与原ByteBuffer共享的内存区，且拥有独立的position、limit、capacity等指针（零拷贝）
             ByteBuffer byteBuffer = writeBuffer != null ? writeBuffer.slice() : this.mappedByteBuffer.slice();
+            // 并设置position为当前指针
             byteBuffer.position(currentPos);
             AppendMessageResult result;
+            // 执行写入操作，将消息内容存储到ByteBuffer中，这里只是将消息存储在MappedFile对应的内存映射Buffer中，并没有写入磁盘
             if (messageExt instanceof MessageExtBrokerInner) {
                 result = cb.doAppend(this.getFileFromOffset(), byteBuffer, this.fileSize - currentPos, (MessageExtBrokerInner) messageExt);
             } else if (messageExt instanceof MessageExtBatch) {
@@ -278,6 +329,8 @@ public class MappedFile extends ReferenceResource {
                     if (writeBuffer != null || this.fileChannel.position() != 0) {
                         this.fileChannel.force(false);
                     } else {
+                        // 直接调用mappedByteBuffer或fileChannel的force()方法将数据
+                        // 写入磁盘，将内存中的数据持久化到磁盘中，
                         this.mappedByteBuffer.force();
                     }
                 } catch (Throwable e) {
@@ -294,6 +347,11 @@ public class MappedFile extends ReferenceResource {
         return this.getFlushedPosition();
     }
 
+    /**
+     * 内存映射文件的提交动作由MappedFile的commit()方法实现
+     * @param commitLeastPages 本次提交的最小页数，如果待提交数据不满足commitLeastPages，则不执行本次提交操作，等待下次提交
+     * @return
+     */
     public int commit(final int commitLeastPages) {
         if (writeBuffer == null) {
             //no need to commit data to file channel, so just regard wrotePosition as committedPosition.
@@ -350,6 +408,15 @@ public class MappedFile extends ReferenceResource {
         return write > flush;
     }
 
+    /**
+     * 判断是否执行commit操作。如果文件已满，返回true。如果
+     * commitLeastPages大于0，则计算wrotePosition（当前writeBuffe的
+     * 写指针）与上一次提交的指针（committedPosition）的差值，将其除
+     * 以OS_PAGE_SIZE得到当前脏页的数量，如果大于commitLeastPages，
+     * 则返回true。如果commitLeastPages小于0，表示只要存在脏页就提交
+     * @param commitLeastPages
+     * @return
+     */
     protected boolean isAbleToCommit(final int commitLeastPages) {
         int flush = this.committedPosition.get();
         int write = this.wrotePosition.get();
@@ -398,14 +465,29 @@ public class MappedFile extends ReferenceResource {
         return null;
     }
 
+    /**
+     * 首先查找pos到当前最大可读指针之间的数据，因为在整个写入期
+     * 间都未曾改变MappedByteBuffer的指针，所以
+     * mappedByteBuffer.slice()方法返回的共享缓存区空间为整个
+     * MappedFile。然后通过设置byteBuffer的position为待查找的值，读
+     * 取字节为当前可读字节长度，最终返回的ByteBuffer的limit（可读最
+     * 大长度）为size。整个共享缓存区的容量为
+     * MappedFile#fileSizepos，故在操作SelectMappedBufferResult时不
+     * 能对包含在里面的ByteBuffer调用flip()方法。
+     *
+     * @param pos
+     * @return
+     */
     public SelectMappedBufferResult selectMappedBuffer(int pos) {
         int readPosition = getReadPosition();
         if (pos < readPosition && pos >= 0) {
             if (this.hold()) {
                 ByteBuffer byteBuffer = this.mappedByteBuffer.slice();
+                // 设置读起始指针
                 byteBuffer.position(pos);
                 int size = readPosition - pos;
                 ByteBuffer byteBufferNew = byteBuffer.slice();
+                // 设置读结束指针
                 byteBufferNew.limit(size);
                 return new SelectMappedBufferResult(this.fileFromOffset + pos, byteBufferNew, size, this);
             }
