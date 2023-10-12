@@ -44,6 +44,9 @@ public class MessageStoreConfig {
 
     // CommitLog flush interval
     // flush data to disk
+    /**
+     * ConmmitLog 刷盘线程任务运行间隔时间
+     */
     @ImportantField
     private int flushIntervalCommitLog = 500;
 
@@ -68,14 +71,29 @@ public class MessageStoreConfig {
     // CommitLog removal interval
     private int deleteCommitLogFilesInterval = 100;
     // ConsumeQueue removal interval
+    /**
+     * 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间
+     */
     private int deleteConsumeQueueFilesInterval = 100;
+    /**
+     * 在清除过期文件时，如果该文件被其他线程占用（引用次数大于0，比如读取消息），此时会
+     * 阻止此次删除任务，同时在第一次试图删除该文件时记录当前时间戳，destroyMapedFileIntervalForcibly表示第一次拒绝删除之后能
+     * 保留文件的最大时间，在此时间内，同样可以被拒绝删除，超过该时间后，会将引用次数设置为负数，文件将被强制删除
+     */
     private int destroyMapedFileIntervalForcibly = 1000 * 120;
     private int redeleteHangedFileInterval = 1000 * 120;
     // When to delete,default is at 4 am
     @ImportantField
     private String deleteWhen = "04";
+    /**
+     * 表示CommitLog文件、ConsumeQueue文件所在磁盘分区的最大使用量，如果超过该值，则需要立即清除过
+     * 期文件，默认 75，如果超过了 75% 就会触发清理过期文件的动作
+     */
     private int diskMaxUsedSpaceRatio = 75;
     // The number of hours to keep a log file before deleting it (in hours)
+    /**
+     * 日志文件保存的小时数
+     */
     @ImportantField
     private int fileReservedTime = 72;
     // Flow control for ConsumeQueue
@@ -87,6 +105,9 @@ public class MessageStoreConfig {
     // This check adds some overhead,so it may be disabled in cases seeking extreme performance.
     private boolean checkCRCOnRecover = true;
     // How many pages are to be flushed when flush CommitLog
+    /**
+     * 一次刷盘任务至少包含页数，如果待写入数据不足，小于该参数配置的值，将忽略本次刷盘任务，默认4页
+     */
     private int flushCommitLogLeastPages = 4;
     // How many pages are to be committed when commit data to file
     private int commitCommitLogLeastPages = 4;
@@ -94,6 +115,9 @@ public class MessageStoreConfig {
     private int flushLeastPagesWhenWarmMapedFile = 1024 / 4 * 16;
     // How many pages are to be flushed when flush ConsumeQueue
     private int flushConsumeQueueLeastPages = 2;
+    /**
+     * 两次真实刷盘任务的最大间隔时间，默认10s
+     */
     private int flushCommitLogThoroughInterval = 1000 * 10;
     private int commitCommitLogThoroughInterval = 200;
     private int flushConsumeQueueThoroughInterval = 1000 * 60;
@@ -131,6 +155,10 @@ public class MessageStoreConfig {
     private int syncFlushTimeout = 1000 * 5;
     private String messageDelayLevel = "1s 5s 10s 30s 1m 2m 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h";
     private long flushDelayOffsetInterval = 1000 * 10;
+    /**
+     * 在一些情况下，即使CommitLog文件已经过期，也可能因为某些原因（例如消费者消费速度慢等）而无法被清理。
+     * 此时，如果cleanFileForciblyEnable参数被设置为true，那么RocketMQ将会强制地清理这些文件，从而释放磁盘空间。
+     */
     @ImportantField
     private boolean cleanFileForciblyEnable = true;
     private boolean warmMapedFileEnable = false;
@@ -141,6 +169,25 @@ public class MessageStoreConfig {
     private long osPageCacheBusyTimeOutMills = 1000;
     private int defaultQueryMaxNum = 32;
 
+    /**
+     * 是否开启 transientStorePool 机制
+     *
+     * 开启TransientStorePool机制，消息数据首先被写入到堆外内存（也就是TransientStorePool中的DirectByteBuffer）。然后由刷盘线程（CommitRealTimeService）
+     * 在合适的时机把数据从堆外内存复制到内存映射区域（MappedByteBuffer），并调用force()方法将数据写入磁盘。
+     *
+     * 有了 TransientStorePool 的存在，消息可以批量写入内存缓冲区，RocketMQ也就可以有效地控制何时以及如何将脏页（Dirty Page，即已修改但还未写入磁盘的内存页）
+     * 刷写到磁盘，避免了操作系统自动进行的随机性、不可预测的脏页刷写操作，从而提升了I/O性能，特别是在大量写入请求的场景下。
+     *
+     * 值得一提的是，使用TransientStorePool并非没有代价。因为需要额外的一次内存复制操作，即从堆外内存复制到内存映射区域。
+     * 但是在大多数情况下，通过控制脏页刷写带来的性能提升，相比于增加的内存复制开销，更加明显。
+     *
+     * 并且开启transientStorePool机制后，由于消息数据会先写入 堆外内存，然后由特定后台线程（CommitRealTimeService），将堆外内存中的修改
+     * commit 到 内存映射区域，而这一步如果发生 断电、服务宕机，都会产生消息丢失。而传统的异步刷盘，由于消息是直接写入内存映射区域，所以服务宕机
+     * 并不会丢失数据，只有在服务器突然断电时才会丢失少量数据。
+     *
+     * 所以整体来看消息存储可靠性： 同步刷盘（任何情况不会丢失消息）> 异步刷盘+transientStorePool=false（突然断电丢失少量消息）> 异步刷盘+transientStorePool=true（突然断电或服务宕机都会丢失消息）
+     *
+     */
     @ImportantField
     private boolean transientStorePoolEnable = false;
     private int transientStorePoolSize = 5;

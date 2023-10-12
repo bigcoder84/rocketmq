@@ -1296,6 +1296,9 @@ public class DefaultMessageStore implements MessageStore {
 
     private void addScheduleTask() {
 
+        // RocketMQ每隔10s调度一次cleanFilesPeriodically，检测是否需
+        // 要清除过期文件。执行频率可以通过cleanResourceInterval进行设
+        //置，默认10s
         this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
             @Override
             public void run() {
@@ -1435,10 +1438,10 @@ public class DefaultMessageStore implements MessageStore {
         long maxPhyOffsetOfConsumeQueue = this.recoverConsumeQueue();
 
         if (lastExitOK) {
-            // 正常停止
+            // 正常停止，恢复CommitLog
             this.commitLog.recoverNormally(maxPhyOffsetOfConsumeQueue);
         } else {
-            // 异常停止
+            // 异常停止，恢复CommitLog
             this.commitLog.recoverAbnormally(maxPhyOffsetOfConsumeQueue);
         }
 
@@ -1628,12 +1631,23 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * CommitLog过期清理实现
+     */
     class CleanCommitLogService {
 
         private final static int MAX_MANUAL_DELETE_FILE_TIMES = 20;
+        /**
+         * 通过系统参数 -Drocketmq.broker.diskSpaceWarningLevelRatio进行设置，
+         * 默认0.90。如果磁盘分区使用率超过该阈值，将设置磁盘为不可写，此时会拒绝写入新消息
+         */
         private final double diskSpaceWarningLevelRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceWarningLevelRatio", "0.90"));
 
+        /**
+         * 通过系统参数 -Drocketmq.broker.diskSpaceCleanForcibly-Ratio进行设置，
+         * 默认0.85。如果磁盘分区使用超过该阈值，建议立即执行过期文件删除，但不会拒绝写入新消息
+         */
         private final double diskSpaceCleanForciblyRatio =
             Double.parseDouble(System.getProperty("rocketmq.broker.diskSpaceCleanForciblyRatio", "0.85"));
         private long lastRedeleteTimestamp = 0;
@@ -1659,14 +1673,24 @@ public class DefaultMessageStore implements MessageStore {
 
         private void deleteExpiredFiles() {
             int deleteCount = 0;
+            // 文件保留时间，如果超过了该时间，则认为是过期文件，可以被删除。单位：小时
             long fileReservedTime = DefaultMessageStore.this.getMessageStoreConfig().getFileReservedTime();
+            // 删除物理文件的间隔时间，在一次清除过程中，可能需要被删除的文件不止一个，该值指定两次删除文件的间隔时间
             int deletePhysicFilesInterval = DefaultMessageStore.this.getMessageStoreConfig().getDeleteCommitLogFilesInterval();
+            // 在清除过期文件时，如果该文件被其他线程占用（引用次数大于0，比如读取消息），此时会
+            // 阻止此次删除任务，同时在第一次试图删除该文件时记录当前时间戳，destroyMapedFileIntervalForcibly表示第一次拒绝删除之后能
+            // 保留文件的最大时间，在此时间内，同样可以被拒绝删除，超过该时间后，会将引用次数设置为负数，文件将被强制删除
             int destroyMapedFileIntervalForcibly = DefaultMessageStore.this.getMessageStoreConfig().getDestroyMapedFileIntervalForcibly();
 
+            // 指定删除文件的时间点，RocketMQ通过deleteWhen设置每天在固定时间执行一次删除过期文件操作，默认凌晨4点
             boolean timeup = this.isTimeToDelete();
+            // 检查磁盘空间是否充足，如果磁盘占用达到阈值（默认90%）则会将broker设置为不可写状态，
+            // 如果磁盘空间不充足(默认使用率达到75%)，则返回true，表示应该触发过期文件删除操作
             boolean spacefull = this.isSpaceToDelete();
+            // 预留手工触发机制，可以通过调用excuteDeleteFilesManualy方法手工触发删除过期文件的操作，目前RocketMQ暂未封装手工触发文件删除的命令
             boolean manualDelete = this.manualDeleteFileSeveralTimes > 0;
 
+            // 满足任意一种情况，则触发过期文件删除功能
             if (timeup || spacefull || manualDelete) {
 
                 if (manualDelete)
@@ -1683,6 +1707,7 @@ public class DefaultMessageStore implements MessageStore {
 
                 fileReservedTime *= 60 * 60 * 1000;
 
+                // 执行删除操作
                 deleteCount = DefaultMessageStore.this.commitLog.deleteExpiredFile(fileReservedTime, deletePhysicFilesInterval,
                     destroyMapedFileIntervalForcibly, cleanAtOnce);
                 if (deleteCount > 0) {
@@ -1719,35 +1744,45 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         private boolean isSpaceToDelete() {
+            // 表示CommitLog文件、ConsumeQueue文件所在磁盘分区的最大使用量，如果超过该值，则需要立即清除过期文件，默认 75%
             double ratio = DefaultMessageStore.this.getMessageStoreConfig().getDiskMaxUsedSpaceRatio() / 100.0;
 
+            // 表示是否需要立即执行清除过期文件的操作
             cleanImmediately = false;
 
+            // CommitLog存储空间计算
             {
                 String storePathPhysic = DefaultMessageStore.this.getMessageStoreConfig().getStorePathCommitLog();
+                // 当前CommitLog目录所在的磁盘分区的磁盘使用率，通过File#getTotalSpace方法获取文件所在磁盘分区的总容量，
+                // 通过File#getFreeSpace方法获取文件所在磁盘分区的剩余容量
                 double physicRatio = UtilAll.getDiskPartitionSpaceUsedPercent(storePathPhysic);
                 if (physicRatio > diskSpaceWarningLevelRatio) {
+                    // 将broker设置为不可写状态
                     boolean diskok = DefaultMessageStore.this.runningFlags.getAndMakeDiskFull();
                     if (diskok) {
                         DefaultMessageStore.log.error("physic disk maybe full soon " + physicRatio + ", so mark disk full");
                     }
-
+                    // 设置为需要立即清理
                     cleanImmediately = true;
                 } else if (physicRatio > diskSpaceCleanForciblyRatio) {
+                    // 设置为需要立即清理
                     cleanImmediately = true;
                 } else {
+                    // 恢复broker为可写状态
                     boolean diskok = DefaultMessageStore.this.runningFlags.getAndMakeDiskOK();
                     if (!diskok) {
                         DefaultMessageStore.log.info("physic disk space OK " + physicRatio + ", so mark disk ok");
                     }
                 }
 
+                // 判断磁盘使用率，是否达到指定值（默认75%）
                 if (physicRatio < 0 || physicRatio > ratio) {
                     DefaultMessageStore.log.info("physic disk maybe full soon, so reclaim space, " + physicRatio);
                     return true;
                 }
             }
 
+            // ConsumeQueue 存储空间计算
             {
                 String storePathLogics = StorePathConfigHelper
                     .getStorePathConsumeQueue(DefaultMessageStore.this.getMessageStoreConfig().getStorePathRootDir());
@@ -1786,6 +1821,9 @@ public class DefaultMessageStore implements MessageStore {
         }
     }
 
+    /**
+     * ConsumeQueue过期清理实现
+     */
     class CleanConsumeQueueService {
         private long lastPhysicalMinOffset = 0;
 
