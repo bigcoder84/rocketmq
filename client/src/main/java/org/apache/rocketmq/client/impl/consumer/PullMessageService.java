@@ -29,6 +29,9 @@ import org.apache.rocketmq.common.utils.ThreadUtils;
 
 public class PullMessageService extends ServiceThread {
     private final InternalLogger log = ClientLogger.getLog();
+    /**
+     * 消息拉取任务阻塞队列
+     */
     private final LinkedBlockingQueue<PullRequest> pullRequestQueue = new LinkedBlockingQueue<PullRequest>();
     private final MQClientInstance mQClientFactory;
     private final ScheduledExecutorService scheduledExecutorService = Executors
@@ -76,6 +79,15 @@ public class PullMessageService extends ServiceThread {
         return scheduledExecutorService;
     }
 
+    /**
+     * 根据消费组名从MQClientInstance中获取消费者的内部实现类
+     * MQConsumerInner，令人意外的是，这里将consumer强制转换为
+     * DefaultMQPushConsumerImpl，也就是PullMessageService，该线程只
+     * 为推模式服务，那拉模式如何拉取消息呢？其实细想也不难理解，对
+     * 于拉模式，RocketMQ只需要提供拉取消息API，再由应用程序调用API
+     *
+     * @param pullRequest
+     */
     private void pullMessage(final PullRequest pullRequest) {
         final MQConsumerInner consumer = this.mQClientFactory.selectConsumer(pullRequest.getConsumerGroup());
         if (consumer != null) {
@@ -90,8 +102,13 @@ public class PullMessageService extends ServiceThread {
     public void run() {
         log.info(this.getServiceName() + " service started");
 
+        //  while (!this.isStopped()) 是一种通用的设计技巧，Stopped
+        // 声明为volatile，每执行一次业务逻辑，检测一下其运行状态，可以
+        // 通过其他线程将Stopped设置为true，从而停止该线程
         while (!this.isStopped()) {
             try {
+                // 从pullRequestQueue中获取一个PullRequest消息拉取任务，
+                // 如果pullRequestQueue为空，则线程将阻塞，直到有拉取任务被放入
                 PullRequest pullRequest = this.pullRequestQueue.take();
                 this.pullMessage(pullRequest);
             } catch (InterruptedException ignored) {

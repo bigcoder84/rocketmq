@@ -31,7 +31,7 @@ public class MQFaultStrategy {
      * 开启与不开启sendLatencyFaultEnable机制在消息发送时都能规避故
      * 障的Broker，那么这两种机制有何区别呢？
      *
-     * 开启所谓的故障延迟机制，即设置sendLatencyFaultEnable为ture，
+     * 开启所谓的故障延迟机制，即设置sendLatencyFaultEnable为true，
      * 其实是一种较为悲观的做法。当消息发送者遇到一次消息发送失败
      * 后，就会悲观地认为Broker不可用，在接下来的一段时间内就不再向
      * 其发送消息，直接避开该Broker。而不开启延迟规避机制，就只会在

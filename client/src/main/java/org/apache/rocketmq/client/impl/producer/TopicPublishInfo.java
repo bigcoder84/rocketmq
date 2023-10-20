@@ -79,6 +79,11 @@ public class TopicPublishInfo {
         this.haveTopicRouterInfo = haveTopicRouterInfo;
     }
 
+    /**
+     * 选择一个队列，如果上一次发送失败，这一次会尽量规避调上一次失败的broker上的队列
+     * @param lastBrokerName 上一次失败的broker
+     * @return
+     */
     public MessageQueue selectOneMessageQueue(final String lastBrokerName) {
         if (lastBrokerName == null) {
             // 在消息发送过程中，可能会多次执行选择消息队列这个方法，

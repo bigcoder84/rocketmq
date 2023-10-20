@@ -139,6 +139,26 @@ public class PullAPIWrapper {
         }
     }
 
+    /**
+     * 通过远程调用，从 broker 拉取消息
+     * @param mq 从哪个队列拉取消息
+     * @param subExpression 消息过滤表达式。
+     * @param expressionType 消息表达式类型，分为TAG、SQL92。
+     * @param subVersion
+     * @param offset 拉取的消息的起始偏移量
+     * @param maxNums 拉取的消息数量
+     * @param sysFlag 表示位，参考： org.apache.rocketmq.common.sysflag.PullSysFlag
+     * @param commitOffset 已消费偏移量
+     * @param brokerSuspendMaxTimeMillis 消息拉取过程中允许Broker挂起的时间，默认15s。
+     * @param timeoutMillis 消息拉取超时时间
+     * @param communicationMode 消息拉取模式，默认为异步拉取。
+     * @param pullCallback 拉取回调
+     * @return
+     * @throws MQClientException
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public PullResult pullKernelImpl(
         final MessageQueue mq,
         final String subExpression,
@@ -154,6 +174,10 @@ public class PullAPIWrapper {
         final PullCallback pullCallback
     ) throws MQClientException, RemotingException, MQBrokerException, InterruptedException {
         FindBrokerResult findBrokerResult =
+            // 根据brokerName、BrokerId从MQClientInstance中获取
+            //Broker地址，在整个RocketMQ Broker的部署结构中，相同名称的
+            //Broker构成主从结构，其BrokerId会不一样，在每次拉取消息后，会
+            //给出一个建议，下次是从主节点还是从节点拉取
             this.mQClientFactory.findBrokerAddressInSubscribe(mq.getBrokerName(),
                 this.recalculatePullFromWhichNode(mq), false);
         if (null == findBrokerResult) {
@@ -179,12 +203,19 @@ public class PullAPIWrapper {
             }
 
             PullMessageRequestHeader requestHeader = new PullMessageRequestHeader();
+            // 消费组名称
             requestHeader.setConsumerGroup(this.consumerGroup);
+            // topic名称
             requestHeader.setTopic(mq.getTopic());
+            // 队列ID
             requestHeader.setQueueId(mq.getQueueId());
+            // 队列的偏移量
             requestHeader.setQueueOffset(offset);
+            // 拉取的消息数量
             requestHeader.setMaxMsgNums(maxNums);
+            // 消息拉取的标识位，参考：org.apache.rocketmq.common.sysflag.PullSysFlag
             requestHeader.setSysFlag(sysFlagInner);
+            // 已经消费完成的消息偏移量
             requestHeader.setCommitOffset(commitOffset);
             requestHeader.setSuspendTimeoutMillis(brokerSuspendMaxTimeMillis);
             requestHeader.setSubscription(subExpression);

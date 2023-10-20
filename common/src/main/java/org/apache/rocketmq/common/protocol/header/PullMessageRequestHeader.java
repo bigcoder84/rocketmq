@@ -26,26 +26,57 @@ import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class PullMessageRequestHeader implements CommandCustomHeader {
+
+    /**
+     * 消费组名称
+     */
     @CFNotNull
     private String consumerGroup;
+    /**
+     * topic名称
+     */
     @CFNotNull
     private String topic;
+    /**
+     * 队列ID
+     */
     @CFNotNull
     private Integer queueId;
+    /**
+     * 队列的偏移量
+     */
     @CFNotNull
     private Long queueOffset;
+    /**
+     * 拉取的消息数量
+     */
     @CFNotNull
     private Integer maxMsgNums;
+    /**
+     * 消息拉取的标识位，参考：org.apache.rocketmq.common.sysflag.PullSysFlag
+     */
     @CFNotNull
     private Integer sysFlag;
+    /**
+     * 已经消费完成的消息偏移量
+     */
     @CFNotNull
     private Long commitOffset;
+    /**
+     * broker暂停最大时间毫秒
+     */
     @CFNotNull
     private Long suspendTimeoutMillis;
+    /**
+     * 消息过滤表达式
+     */
     @CFNullable
     private String subscription;
     @CFNotNull
     private Long subVersion;
+    /**
+     * 参考：org.apache.rocketmq.common.filter.ExpressionType
+     */
     private String expressionType;
 
     @Override
