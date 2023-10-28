@@ -1096,6 +1096,18 @@ public class MQClientAPIImpl {
         return response.getCode() == ResponseCode.SUCCESS;
     }
 
+    /**
+     * 将消息重新发回 broker retry topic,使得消费者能延迟一定时间后重新消费该消息
+     * @param addr
+     * @param msg
+     * @param consumerGroup
+     * @param delayLevel
+     * @param timeoutMillis
+     * @param maxConsumeRetryTimes
+     * @throws RemotingException
+     * @throws MQBrokerException
+     * @throws InterruptedException
+     */
     public void consumerSendMessageBack(
         final String addr,
         final MessageExt msg,
@@ -1105,13 +1117,20 @@ public class MQClientAPIImpl {
         final int maxConsumeRetryTimes
     ) throws RemotingException, MQBrokerException, InterruptedException {
         ConsumerSendMsgBackRequestHeader requestHeader = new ConsumerSendMsgBackRequestHeader();
+        // 命令类型为CONSUMER_SEND_MSG_BACK，broker端处理类为：org.apache.rocketmq.broker.processor.SendMessageProcessor.processRequest
         RemotingCommand request = RemotingCommand.createRequestCommand(RequestCode.CONSUMER_SEND_MSG_BACK, requestHeader);
 
         requestHeader.setGroup(consumerGroup);
+        // 消息topic
         requestHeader.setOriginTopic(msg.getTopic());
+        // 消息物理偏移量
         requestHeader.setOffset(msg.getCommitLogOffset());
+        // 延迟级别。RcketMQ不支持精确的定时消息调度，而是提供几个延时级别，MessageStoreConfig#messageDelayLevel = "1s 5s 10s 30s 1m 2m
+        //3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h"，delayLevel=1，表示延迟5s，delayLevel=2，表示延迟10s。
         requestHeader.setDelayLevel(delayLevel);
+        // 消息ID
         requestHeader.setOriginMsgId(msg.getMsgId());
+        // 最大重试消费次数，默认16次
         requestHeader.setMaxReconsumeTimes(maxConsumeRetryTimes);
 
         RemotingCommand response = this.remotingClient.invokeSync(MixAll.brokerVIPChannel(this.clientConfig.isVipChannelEnabled(), addr),

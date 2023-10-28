@@ -23,13 +23,26 @@ import org.apache.rocketmq.remoting.annotation.CFNullable;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class ConsumerSendMsgBackRequestHeader implements CommandCustomHeader {
+    /**
+     * 消息物理偏移量
+     */
     @CFNotNull
     private Long offset;
     @CFNotNull
     private String group;
+    /**
+     * 延迟级别。RcketMQ不支持精确的定时消息调度，而是提供几个延时级别，MessageStoreConfig#messageDelayLevel = "1s 5s 10s 30s 1m 2m
+     * 3m 4m 5m 6m 7m 8m 9m 10m 20m 30m 1h 2h"，delayLevel=1，表示延迟5s，delayLevel=2，表示延迟10s。
+     */
     @CFNotNull
     private Integer delayLevel;
+    /**
+     * 消息ID
+     */
     private String originMsgId;
+    /**
+     * 消息topic
+     */
     private String originTopic;
     @CFNullable
     private boolean unitMode = false;

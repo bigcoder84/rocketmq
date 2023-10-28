@@ -18,7 +18,8 @@ package org.apache.rocketmq.common.consumer;
 
 public enum ConsumeFromWhere {
     /**
-     * 此处分为两种情况，如果磁盘消息未过期且未被删除，则从最小偏移量开始消费。如果磁盘已过期并被删除，则从最大偏移量开始消费。
+     * 一个新的订阅组第一次启动从队列的最后位置开始消费<br>
+     * 后续再启动接着上次消费的进度开始消费
      */
     CONSUME_FROM_LAST_OFFSET,
 
@@ -28,12 +29,16 @@ public enum ConsumeFromWhere {
     CONSUME_FROM_MIN_OFFSET,
     @Deprecated
     CONSUME_FROM_MAX_OFFSET,
+
     /**
-     * 从队列当前最小偏移量开始消费
+     * 一个新的订阅组第一次启动从队列的最前位置开始消费<br>
+     * 后续再启动接着上次消费的进度开始消费
      */
     CONSUME_FROM_FIRST_OFFSET,
     /**
-     * 从消费者指定时间戳开始消费
+     * 一个新的订阅组第一次启动从指定时间点开始消费<br>
+     * 后续再启动接着上次消费的进度开始消费<br>
+     * 时间点设置参见DefaultMQPushConsumer.consumeTimestamp参数
      */
     CONSUME_FROM_TIMESTAMP,
 }

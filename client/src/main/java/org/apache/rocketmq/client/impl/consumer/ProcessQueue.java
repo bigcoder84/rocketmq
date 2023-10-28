@@ -231,6 +231,11 @@ public class ProcessQueue {
         return 0;
     }
 
+    /**
+     * 将消息移除，返回本地队列中最小的偏移量
+     * @param msgs
+     * @return
+     */
     public long removeMessage(final List<MessageExt> msgs) {
         long result = -1;
         final long now = System.currentTimeMillis();

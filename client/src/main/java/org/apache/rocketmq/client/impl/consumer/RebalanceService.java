@@ -21,6 +21,12 @@ import org.apache.rocketmq.client.log.ClientLogger;
 import org.apache.rocketmq.common.ServiceThread;
 import org.apache.rocketmq.logging.InternalLogger;
 
+/**
+ * 消息队列负载与重新分布机制的实现。
+ * 问题一：集群内多个消费者如何负载topic下多个消息队列的呢？
+ * 问题二：如果有新的消费者加入，消息队列又会如何分布？
+ *
+ */
 public class RebalanceService extends ServiceThread {
     private static long waitInterval =
         Long.parseLong(System.getProperty(
@@ -37,6 +43,7 @@ public class RebalanceService extends ServiceThread {
         log.info(this.getServiceName() + " service started");
 
         while (!this.isStopped()) {
+            // 默认每20s执行一次 doRebalance
             this.waitForRunning(waitInterval);
             this.mqClientFactory.doRebalance();
         }

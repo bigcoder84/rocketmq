@@ -988,10 +988,12 @@ public class MQClientInstance {
     }
 
     public void doRebalance() {
+        // 遍历消费者
         for (Map.Entry<String, MQConsumerInner> entry : this.consumerTable.entrySet()) {
             MQConsumerInner impl = entry.getValue();
             if (impl != null) {
                 try {
+                    // 对消费者执行 doRebalance
                     impl.doRebalance();
                 } catch (Throwable e) {
                     log.error("doRebalance exception", e);
