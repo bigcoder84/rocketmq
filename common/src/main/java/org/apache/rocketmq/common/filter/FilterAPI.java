@@ -43,15 +43,19 @@ public class FilterAPI {
         subscriptionData.setSubString(subString);
 
         if (null == subString || subString.equals(SubscriptionData.SUB_ALL) || subString.length() == 0) {
+            // 订阅所有消息
             subscriptionData.setSubString(SubscriptionData.SUB_ALL);
         } else {
+            // 如果订阅的不是*,则通过 || 分割
             String[] tags = subString.split("\\|\\|");
             if (tags.length > 0) {
                 for (String tag : tags) {
                     if (tag.length() > 0) {
                         String trimString = tag.trim();
                         if (trimString.length() > 0) {
+                            // 保存分割后的TAG值
                             subscriptionData.getTagsSet().add(trimString);
+                            // 保存分割后的TAG HashCode
                             subscriptionData.getCodeSet().add(trimString.hashCode());
                         }
                     }
@@ -66,6 +70,7 @@ public class FilterAPI {
 
     public static SubscriptionData build(final String topic, final String subString,
         final String type) throws Exception {
+        // 如果是TAG过滤，则执行这里
         if (ExpressionType.TAG.equals(type) || type == null) {
             return buildSubscriptionData(null, topic, subString);
         }
@@ -74,6 +79,7 @@ public class FilterAPI {
             throw new IllegalArgumentException("Expression can't be null! " + type);
         }
 
+        // 如果是SQL过滤，则执行这里，相对简单，直接原样发送给broker
         SubscriptionData subscriptionData = new SubscriptionData();
         subscriptionData.setTopic(topic);
         subscriptionData.setSubString(subString);

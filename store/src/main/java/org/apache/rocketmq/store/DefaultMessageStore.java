@@ -640,8 +640,11 @@ public class DefaultMessageStore implements MessageStore {
                         final boolean diskFallRecorded = this.messageStoreConfig.isDiskFallRecorded();
                         ConsumeQueueExt.CqExtUnit cqExtUnit = new ConsumeQueueExt.CqExtUnit();
                         for (; i < bufferConsumeQueue.getSize() && i < maxFilterMessageCount; i += ConsumeQueue.CQ_STORE_UNIT_SIZE) {
+                            // 消息物理偏移量
                             long offsetPy = bufferConsumeQueue.getByteBuffer().getLong();
+                            // 消息长度
                             int sizePy = bufferConsumeQueue.getByteBuffer().getInt();
+                            // 消息TAG的hash码
                             long tagsCode = bufferConsumeQueue.getByteBuffer().getLong();
 
                             maxPhyOffsetPulling = offsetPy;
@@ -671,6 +674,7 @@ public class DefaultMessageStore implements MessageStore {
                                 }
                             }
 
+                            // 对消息TAG的Hash码进行比对，如果未匹配，则继续拉取下一条消息
                             if (messageFilter != null
                                 && !messageFilter.isMatchedByConsumeQueue(isTagsCodeLegal ? tagsCode : null, extRet ? cqExtUnit : null)) {
                                 if (getResult.getBufferTotalSize() == 0) {
@@ -690,6 +694,7 @@ public class DefaultMessageStore implements MessageStore {
                                 continue;
                             }
 
+                            // 对消息属性进行SQL92过滤，此种过滤方式会反序列化消息内容，性能相对TAG过滤会差一点
                             if (messageFilter != null
                                 && !messageFilter.isMatchedByCommitLog(selectResult.getByteBuffer().slice(), null)) {
                                 if (getResult.getBufferTotalSize() == 0) {

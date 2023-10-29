@@ -57,19 +57,28 @@ public class ExpressionMessageFilter implements MessageFilter {
         }
     }
 
+    /**
+     * 实现 TAG 过滤模式
+     * @param tagsCode 消息标志的哈希码
+     * @param cqExtUnit ConsumeQueue条目扩展属性
+     * @return
+     */
     @Override
     public boolean isMatchedByConsumeQueue(Long tagsCode, ConsumeQueueExt.CqExtUnit cqExtUnit) {
+        // 如果是订阅消息为空，则返回true，不进行过滤
         if (null == subscriptionData) {
             return true;
         }
 
+        // 如果是类模式过滤，则返回true，不进行过滤
         if (subscriptionData.isClassFilterMode()) {
             return true;
         }
 
+
         // by tags code.
         if (ExpressionType.isTagType(subscriptionData.getExpressionType())) {
-
+            // 如果是TAG模式进行过滤
             if (tagsCode == null) {
                 return true;
             }
@@ -78,6 +87,8 @@ public class ExpressionMessageFilter implements MessageFilter {
                 return true;
             }
 
+            // 判断ConsumeQueue中存的tag hash 是否包含与订阅信息中的 hash 集合中，
+            // 如果是则代表大概率匹配上了，hash冲突的情况交由客户端进行严格匹配后剔除。
             return subscriptionData.getCodeSet().contains(tagsCode.intValue());
         } else {
             // no expression or no bloom
@@ -114,6 +125,12 @@ public class ExpressionMessageFilter implements MessageFilter {
         return true;
     }
 
+    /**
+     * 实现SQL92过滤消息属性
+     * @param msgBuffer message buffer in commit log, may be null if not invoked in store.
+     * @param properties message properties, should decode from buffer if null by yourself.
+     * @return
+     */
     @Override
     public boolean isMatchedByCommitLog(ByteBuffer msgBuffer, Map<String, String> properties) {
         if (subscriptionData == null) {
@@ -125,6 +142,8 @@ public class ExpressionMessageFilter implements MessageFilter {
         }
 
         if (ExpressionType.isTagType(subscriptionData.getExpressionType())) {
+            // 如果是TAG过滤，则默认返回True，因为前面比对了ConsumeQueue中的TAG hash码，如果出现Hash冲突，则交由客户端解决。
+            // 因为客户端拿到消息后，会对消息中的TAG进行严格比对，而不是Hash比对。
             return true;
         }
 
@@ -138,6 +157,7 @@ public class ExpressionMessageFilter implements MessageFilter {
         }
 
         if (tempProperties == null && msgBuffer != null) {
+            // 对消息进行解码，获取消息中的属性值
             tempProperties = MessageDecoder.decodeProperties(msgBuffer);
         }
 
@@ -145,6 +165,7 @@ public class ExpressionMessageFilter implements MessageFilter {
         try {
             MessageEvaluationContext context = new MessageEvaluationContext(tempProperties);
 
+            // 使用SQL92方式过滤消息
             ret = realFilterData.getCompiledExpression().evaluate(context);
         } catch (Throwable e) {
             log.error("Message Filter error, " + realFilterData + ", " + tempProperties, e);

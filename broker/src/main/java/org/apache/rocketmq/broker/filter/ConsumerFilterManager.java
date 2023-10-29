@@ -136,10 +136,12 @@ public class ConsumerFilterManager extends ConfigManager {
 
     public boolean register(final String topic, final String consumerGroup, final String expression,
         final String type, final long clientVersion) {
+        // 如果是TAG 过滤，则退出
         if (ExpressionType.isTagType(type)) {
             return false;
         }
 
+        // 如果是SQL过滤，但没有指定过滤规则，则退出
         if (expression == null || expression.length() == 0) {
             return false;
         }
@@ -154,6 +156,7 @@ public class ConsumerFilterManager extends ConfigManager {
 
         BloomFilterData bloomFilterData = bloomFilter.generate(consumerGroup + "#" + topic);
 
+        // 构建SQL过滤的ConsumerFilterData
         return filterDataMapByTopic.register(consumerGroup, expression, type, bloomFilterData, clientVersion);
     }
 

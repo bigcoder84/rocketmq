@@ -21,16 +21,20 @@ import java.util.Map;
 
 public interface MessageFilter {
     /**
+     * 根据ConsumeQueue判断消息是否匹配
+     *
      * match by tags code or filter bit map which is calculated when message received
      * and stored in consume queue ext.
      *
-     * @param tagsCode tagsCode
-     * @param cqExtUnit extend unit of consume queue
+     * @param tagsCode 消息标志的哈希码
+     * @param cqExtUnit ConsumeQueue条目扩展属性
      */
     boolean isMatchedByConsumeQueue(final Long tagsCode,
         final ConsumeQueueExt.CqExtUnit cqExtUnit);
 
     /**
+     * 根据存储在CommitLog文件中的内容判断消息是否匹配。
+     *
      * match by message content which are stored in commit log.
      * <br>{@code msgBuffer} and {@code properties} are not all null.If invoked in store,
      * {@code properties} is null;If invoked in {@code PullRequestHoldService}, {@code msgBuffer} is null.

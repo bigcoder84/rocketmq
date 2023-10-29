@@ -60,11 +60,27 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         Long.parseLong(System.getProperty("rocketmq.client.maxTimeConsumeContinuously", "60000"));
     private final DefaultMQPushConsumerImpl defaultMQPushConsumerImpl;
     private final DefaultMQPushConsumer defaultMQPushConsumer;
+    /**
+     * 顺序消息消费监听器
+     */
     private final MessageListenerOrderly messageListener;
+    /**
+     * 消息消费任务队列
+     */
     private final BlockingQueue<Runnable> consumeRequestQueue;
+    /**
+     * 消息消费线程池
+     */
     private final ThreadPoolExecutor consumeExecutor;
     private final String consumerGroup;
+    /**
+     * 消息消费端消息消费队列锁容器，内部持有
+     * ConcurrentMap<MessageQueue, Object> mqLockTable =new ConcurrentHashMap<MessageQueue, Object>()
+     */
     private final MessageQueueLock messageQueueLock = new MessageQueueLock();
+    /**
+     * 调度任务线程池
+     */
     private final ScheduledExecutorService scheduledExecutorService;
     private volatile boolean stopped = false;
 
@@ -90,6 +106,8 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
     public void start() {
         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())) {
+            // 如果消费模式为集群模式，启动定时任务，默认每隔20s锁定一次分配给自己的消息消费队列。通过
+            // -Drocketmq.client.rebalance.lockInterval=20000设置间隔，该值建议与一次消息负载频率相同
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -195,6 +213,13 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
         return result;
     }
 
+    /**
+     * 提交消息消费任务
+     * @param msgs 消息列表，默认一次从服务器拉取32条消息
+     * @param processQueue 消息处理队列
+     * @param messageQueue 消息所属消费队列
+     * @param dispathToConsume
+     */
     @Override
     public void submitConsumeRequest(
         final List<MessageExt> msgs,
@@ -415,15 +440,22 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
         @Override
         public void run() {
+            // 如果消息处理队列为丢弃，则停止本次消费任务
             if (this.processQueue.isDropped()) {
                 log.warn("run, the message queue not be able to consume, because it's dropped. {}", this.messageQueue);
                 return;
             }
 
+            // 根据消息队列获取一个对象。消费消息时申请独占objLock，顺序消息消费的并发度为消息队列，也就是一个消息消费队
+            // 列同一时刻只会被一个消费线程池中的一个线程消费
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
+
             synchronized (objLock) {
+                // 如果是广播模式，则直接进入消费，无须锁定处理队列，因为相互之间无竞争。如果是集群模式，消息消费的前提条件是
+                //proceessQueue被锁定并且锁未超时
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                     || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
+
                     final long beginTime = System.currentTimeMillis();
                     for (boolean continueConsume = true; continueConsume; ) {
                         if (this.processQueue.isDropped()) {
@@ -434,6 +466,9 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                             && !this.processQueue.isLocked()) {
                             log.warn("the message queue not locked, so consume later, {}", this.messageQueue);
+                            // 当一个新的消费队列分配给消费者时，在添加其拉取任务之前必须先向Broker发送对该消息队列加锁的请求，只有加锁成功后，
+                            //才能添加拉取消息，否则等到下一次负载后，只有消费队列被原先占有的消费者释放后，才能开始新的拉取任务
+                            // 集群模式下，如果未锁定处理队列，则延迟该队列的消息消费
                             ConsumeMessageOrderlyService.this.tryLockLaterAndReconsume(this.messageQueue, this.processQueue, 10);
                             break;
                         }
@@ -441,6 +476,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                             && this.processQueue.isLockExpired()) {
                             log.warn("the message queue lock expired, so consume later, {}", this.messageQueue);
+                            // 锁超时，延迟该队列的消息消费
                             ConsumeMessageOrderlyService.this.tryLockLaterAndReconsume(this.messageQueue, this.processQueue, 10);
                             break;
                         }
@@ -462,6 +498,9 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeOrderlyStatus status = null;
 
                             ConsumeMessageContext consumeMessageContext = null;
+                            // 执行消息消费钩子函数（消息消费之前before方法）。通过
+                            // DefaultMQPushConsumerImpl#registerConsumeMessageHook（ConsumeMessageHookconsumeMessagehook）
+                            // 注册消息消费钩子函数并可以注册多个
                             if (ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.hasHook()) {
                                 consumeMessageContext = new ConsumeMessageContext();
                                 consumeMessageContext
@@ -479,13 +518,14 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeReturnType returnType = ConsumeReturnType.SUCCESS;
                             boolean hasException = false;
                             try {
+                                // 申请消息消费锁，如果消息队列被丢弃，则放弃消费该消息消费队列，然后执行消息消费监听器
                                 this.processQueue.getLockConsume().lock();
                                 if (this.processQueue.isDropped()) {
                                     log.warn("consumeMessage, the message queue not be able to consume, because it's dropped. {}",
                                         this.messageQueue);
                                     break;
                                 }
-
+                                // 执行消息消费
                                 status = messageListener.consumeMessage(Collections.unmodifiableList(msgs), context);
                             } catch (Throwable e) {
                                 log.warn("consumeMessage exception: {} Group: {} Msgs: {} MQ: {}",
