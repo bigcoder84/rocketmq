@@ -59,6 +59,8 @@ public class Consumer {
          */
         consumer.subscribe("TopicTest", "*");
 
+        consumer.registerMessageListener();
+
         /*
          *  Register callback to execute on arrival of messages fetched from brokers.
          */

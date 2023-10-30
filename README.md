@@ -20,4 +20,4 @@
   - 广播模式消息消费进度存储： org.apache.rocketmq.client.consumer.store.LocalFileOffsetStore
 - 定时消息代码入口：org.apache.rocketmq.store.schedule.ScheduleMessageService
 - 消息过滤代码入口：org.apache.rocketmq.store.DefaultMessageStore.getMessage、org.apache.rocketmq.broker.filter.ExpressionMessageFilter
-- 
+- 顺序消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageOrderlyService

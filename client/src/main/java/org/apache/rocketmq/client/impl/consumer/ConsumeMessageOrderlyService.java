@@ -53,6 +53,10 @@ import org.apache.rocketmq.remoting.common.RemotingHelper;
 
 /**
  * 顺序消息消费实现
+ *
+ * 该类中有一个 ConsumeMessageOrderlyService.ConsumeRequest 内部类
+ * 区分于 ConsumeMessageConcurrentlyService.ConsumeRequest，当前类的ConsumeRequest实现中，会尝试对消费的队列加分布式锁,
+ * 只有加锁成功后才会消费该队列
  */
 public class ConsumeMessageOrderlyService implements ConsumeMessageService {
     private static final InternalLogger log = ClientLogger.getLog();
@@ -106,8 +110,7 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
 
     public void start() {
         if (MessageModel.CLUSTERING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())) {
-            // 如果消费模式为集群模式，启动定时任务，默认每隔20s锁定一次分配给自己的消息消费队列。通过
-            // -Drocketmq.client.rebalance.lockInterval=20000设置间隔，该值建议与一次消息负载频率相同
+            // Broker 消息队列锁会过期，默认配置 30s。因此，Consumer 需要不断向 Broker 刷新该锁过期时间，默认配置 20s 刷新一次。
             this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
@@ -450,9 +453,12 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
             // 列同一时刻只会被一个消费线程池中的一个线程消费
             final Object objLock = messageQueueLock.fetchLockObject(this.messageQueue);
 
+            // 在当前进程内队列加锁
+            // 虽然在PullMessage时已经对队列加了分布式锁，但是这一步是为了防止多个线程同时消费同一个消息队列的消息。
+            // 这样一来，在多线程环境下，也能保持每个消息队列都是单线程消费，保证了顺序
             synchronized (objLock) {
                 // 如果是广播模式，则直接进入消费，无须锁定处理队列，因为相互之间无竞争。如果是集群模式，消息消费的前提条件是
-                //proceessQueue被锁定并且锁未超时
+                // proceessQueue被锁定并且锁未超时（超时时间默认30s）
                 if (MessageModel.BROADCASTING.equals(ConsumeMessageOrderlyService.this.defaultMQPushConsumerImpl.messageModel())
                     || (this.processQueue.isLocked() && !this.processQueue.isLockExpired())) {
 
@@ -518,7 +524,13 @@ public class ConsumeMessageOrderlyService implements ConsumeMessageService {
                             ConsumeReturnType returnType = ConsumeReturnType.SUCCESS;
                             boolean hasException = false;
                             try {
-                                // 申请消息消费锁，如果消息队列被丢弃，则放弃消费该消息消费队列，然后执行消息消费监听器
+                                // 申请消息消费锁，
+                                // 外面已经对队列加了一次锁了，理论上来说一个队列只会有一个线程消费，为什么还要在这里再加一个消费锁呢？
+                                // 这是因为有队列重平衡的逻辑存在，A实例消费者的某个队列被分配给了B实例消费者，那么此时A实例消费者需要解除对broker队列加的分布式锁，
+                                // 如果此时A实例正在消费消息，并且不在这里加消费锁，A实例重平衡后就会立即释放broker队列锁，就可能会出现B实例消费者拿到了 broker 队列的分布式锁拉取到消息，
+                                // 这样就会出现A实例和B实例同时消费同一个队列的存在
+
+                                // 说白了，在这里加锁是为了防止在消费途中，发生重平衡，将broker队列锁释放（org.apache.rocketmq.client.impl.consumer.RebalancePushImpl.removeUnnecessaryMessageQueue）
                                 this.processQueue.getLockConsume().lock();
                                 if (this.processQueue.isDropped()) {
                                     log.warn("consumeMessage, the message queue not be able to consume, because it's dropped. {}",

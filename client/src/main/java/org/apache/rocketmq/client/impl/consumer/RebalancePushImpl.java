@@ -93,9 +93,13 @@ public class RebalancePushImpl extends RebalanceImpl {
         this.defaultMQPushConsumerImpl.getOffsetStore().removeOffset(mq);
         if (this.defaultMQPushConsumerImpl.isConsumeOrderly()
             && MessageModel.CLUSTERING.equals(this.defaultMQPushConsumerImpl.messageModel())) {
+            // 集群模式下，顺序消费移除时，解锁对队列的锁定
             try {
+                // 获取消息队列消费锁，避免和消息队列消费冲突。如果获取锁失败，则移除消息队列失败，等待下次重新分配消费队列时，再进行移除。
+                // 如果未获得锁而进行移除，则可能出现另外的 Consumer 和当前 Consumer 同时消费该消息队列，导致消息无法严格顺序消费。
                 if (pq.getLockConsume().tryLock(1000, TimeUnit.MILLISECONDS)) {
                     try {
+                        // 解除在broker上加的队列锁
                         return this.unlockDelay(mq, pq);
                     } finally {
                         pq.getLockConsume().unlock();
@@ -118,6 +122,7 @@ public class RebalancePushImpl extends RebalanceImpl {
 
     private boolean unlockDelay(final MessageQueue mq, final ProcessQueue pq) {
 
+        // 解锁 Broker 消息队列锁。如果消息处理队列存在剩余消息，则延迟解锁 Broker 消息队列锁。
         if (pq.hasTempMessage()) {
             log.info("[{}]unlockDelay, begin {} ", mq.hashCode(), mq);
             this.defaultMQPushConsumerImpl.getmQClientFactory().getScheduledExecutorService().schedule(new Runnable() {

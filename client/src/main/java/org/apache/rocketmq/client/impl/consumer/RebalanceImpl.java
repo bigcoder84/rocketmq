@@ -144,8 +144,10 @@ public abstract class RebalanceImpl {
             requestBody.getMqSet().add(mq);
 
             try {
+                // 远程RPC，锁定broker中的队列
                 Set<MessageQueue> lockedMq =
                     this.mQClientFactory.getMQClientAPIImpl().lockBatchMQ(findBrokerResult.getBrokerAddr(), requestBody, 1000);
+
                 for (MessageQueue mmqq : lockedMq) {
                     ProcessQueue processQueue = this.processQueueTable.get(mmqq);
                     if (processQueue != null) {
@@ -389,6 +391,7 @@ public abstract class RebalanceImpl {
         for (MessageQueue mq : mqSet) {
             if (!this.processQueueTable.containsKey(mq)) {
                 // 如果 mqSet 不存在于本地缓存中，则证明是新增加的消息队列
+                // 如果是顺序消费，则需要对queue进行加锁，只有加锁成功才会创建 PullRequest 拉取broker消息
                 if (isOrder && !this.lock(mq)) {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
                     continue;

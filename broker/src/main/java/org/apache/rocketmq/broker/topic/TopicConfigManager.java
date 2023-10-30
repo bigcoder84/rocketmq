@@ -67,6 +67,7 @@ public class TopicConfigManager extends ConfigManager {
         }
         {
             // MixAll.AUTO_CREATE_TOPIC_KEY_TOPIC
+            // 是否开启了自动创建主题
             if (this.brokerController.getBrokerConfig().isAutoCreateTopicEnable()) {
                 String topic = MixAll.AUTO_CREATE_TOPIC_KEY_TOPIC;
                 TopicConfig topicConfig = new TopicConfig(topic);
@@ -228,6 +229,7 @@ public class TopicConfigManager extends ConfigManager {
         }
 
         if (createNew) {
+            // 同步NameServer
             this.brokerController.registerBrokerAll(false, true, true);
         }
 

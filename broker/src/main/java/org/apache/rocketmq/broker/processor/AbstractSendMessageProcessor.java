@@ -172,7 +172,8 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
                 + "] sending message is forbidden");
             return response;
         }
-        // 检查topic是否可以进行消息发送。主要针对默认主题，默认主题不能发送消息，仅供路由查找。
+        // 检查topic是否可以进行消息发送。主要针对默认主题，默认主题不能发送消息，默认主题仅在生产者指定Topic还未创建时提供路由查找，
+        // 使得客户端能将消息发送出来，broker收到消息后，发现没有指定的topic就会创建topic
         if (!this.brokerController.getTopicConfigManager().isTopicCanSendMessage(requestHeader.getTopic())) {
             String errorMsg = "the topic[" + requestHeader.getTopic() + "] is conflict with system reserved words.";
             log.warn(errorMsg);
@@ -193,6 +194,7 @@ public abstract class AbstractSendMessageProcessor implements NettyRequestProces
                 }
             }
 
+            // 如果生产者指定topic不存在，则创建对应的topic
             log.warn("the topic {} not exist, producer: {}", requestHeader.getTopic(), ctx.channel().remoteAddress());
             topicConfig = this.brokerController.getTopicConfigManager().createTopicInSendMessageMethod(
                 requestHeader.getTopic(),
