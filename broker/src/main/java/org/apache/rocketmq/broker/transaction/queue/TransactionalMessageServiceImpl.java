@@ -122,15 +122,19 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
         AbstractTransactionalMessageCheckListener listener) {
         try {
             String topic = MixAll.RMQ_SYS_TRANS_HALF_TOPIC;
+            // 获取事务半消息topic下所有队列信息
             Set<MessageQueue> msgQueues = transactionalMessageBridge.fetchMessageQueues(topic);
             if (msgQueues == null || msgQueues.size() == 0) {
                 log.warn("The queue of topic is empty :" + topic);
                 return;
             }
             log.debug("Check topic={}, queues={}", topic, msgQueues);
+            // 遍历每一个队列，查询需要会查事务状态的消息
             for (MessageQueue messageQueue : msgQueues) {
                 long startTime = System.currentTimeMillis();
+                // 获取对应的op队列
                 MessageQueue opQueue = getOpQueue(messageQueue);
+                // 获取ConsumeQueue Offset
                 long halfOffset = transactionalMessageBridge.fetchConsumeOffset(messageQueue);
                 long opOffset = transactionalMessageBridge.fetchConsumeOffset(opQueue);
                 log.info("Before check, the queue={} msgOffset={} opOffset={}", messageQueue, halfOffset, opOffset);
@@ -181,7 +185,9 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                             }
                         }
 
+                        // 判断是否达到回查次数，
                         if (needDiscard(msgExt, transactionCheckMax) || needSkip(msgExt)) {
+                             // 回查次数超过15，丢弃消息，扔到TRANS_CHECK_MAX_TIME_TOPIC
                             listener.resolveDiscardMsg(msgExt);
                             newOffset = i + 1;
                             i++;
@@ -260,6 +266,8 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
     }
 
     /**
+     * 读取op消息，解析op消息，并填充removeMap
+     *
      * Read op message, parse op message, and fill removeMap
      *
      * @param removeMap Half message to be remove, key:halfOffset, value: opOffset.
@@ -299,6 +307,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 if (queueOffset < miniOffset) {
                     doneOpOffset.add(opMessageExt.getQueueOffset());
                 } else {
+                    // 标识该半消息”已删除“
                     removeMap.put(queueOffset, opMessageExt.getQueueOffset());
                 }
             } else {

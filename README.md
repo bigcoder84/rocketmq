@@ -7,8 +7,11 @@
   - 消息属性索引文件：org.apache.rocketmq.store.index.IndexFile
 - 消息刷盘机制：org.apache.rocketmq.store.CommitLog#handleDiskFlush
 - 消息存储流程：org.apache.rocketmq.store.DefaultMessageStore#putMessage
-
 > 参考文章：[详解RocketMQ消息存储原理](https://blog.bigcoder.cn/archives/17b04280)
+- 事务消息：org.apache.rocketmq.broker.transaction.TransactionalMessageService
+> 参考文章：[RocketMQ事务消息源码解析](https://github.com/bigcoder84/study-notes/blob/master/%E5%88%86%E5%B8%83%E5%BC%8F%E4%B8%8E%E5%BE%AE%E6%9C%8D%E5%8A%A1/MessageQueue/RocketMQ/subfile/_13RocketMQ%E4%BA%8B%E5%8A%A1%E6%B6%88%E6%81%AF.md)
+
+
 
 ## 消息拉取与消费
 

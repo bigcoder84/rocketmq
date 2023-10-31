@@ -23,13 +23,30 @@ import org.apache.rocketmq.common.protocol.NamespaceUtil;
 import org.apache.rocketmq.remoting.RPCHook;
 
 public class TransactionMQProducer extends DefaultMQProducer {
+
+    /**
+     * 务回查监听
+     */
     private TransactionCheckListener transactionCheckListener;
+    /**
+     * 回查线程池最小线程数
+     */
     private int checkThreadPoolMinSize = 1;
+    /**
+     * 回查线程池最大线程数
+     */
     private int checkThreadPoolMaxSize = 1;
+    /**
+     * 最大回查请求数，阻塞队列容量
+     */
     private int checkRequestHoldMax = 2000;
-
+    /**
+     * 执行本地事务/事务回查的线程池
+     */
     private ExecutorService executorService;
-
+    /**
+     * 事务监听器:本地事务、事务回查逻辑
+     */
     private TransactionListener transactionListener;
 
     public TransactionMQProducer() {
