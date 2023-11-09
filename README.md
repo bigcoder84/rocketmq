@@ -33,3 +33,8 @@
 - 顺序消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageOrderlyService
 
 > 参考文章：[RocketMQ源码分析](https://github.com/bigcoder84/study-notes/blob/master/%E5%88%86%E5%B8%83%E5%BC%8F%E4%B8%8E%E5%BE%AE%E6%9C%8D%E5%8A%A1/MessageQueue/RocketMQ/index.md)
+
+## 高可用
+
+- broker主从同步启动入口：org.apache.rocketmq.store.ha.HAService.start
+  - 主服务器监听从服务器连接实现类：org.apache.rocketmq.store.ha.HAService.AcceptSocketService

@@ -420,9 +420,13 @@ public class BrokerController {
             if (!messageStoreConfig.isEnableDLegerCommitLog()) {
                 if (BrokerRole.SLAVE == this.messageStoreConfig.getBrokerRole()) {
                     if (this.messageStoreConfig.getHaMasterAddress() != null && this.messageStoreConfig.getHaMasterAddress().length() >= 6) {
+                        // 如果Broker角色为从服务器，则读取Broker 配置文件中的haMasterAddress属性并更新HAClient的
+                        // masterAddrees，如果角色为从服务器，但haMasterAddress为空，启动Broker并不会报错，但不会执行主从同步复制
                         this.messageStore.updateHaMasterAddress(this.messageStoreConfig.getHaMasterAddress());
                         this.updateMasterHAServerAddrPeriodically = false;
                     } else {
+                        // 如果slave broker配置文件中没有配置master broker地址，则salve broker向NameServer发送心跳时
+                        // NameServer会返回当前brokerName对应的主节点地址，这样就可以自动获取到主节点地址了，而不需要手动配置主节点的地址
                         this.updateMasterHAServerAddrPeriodically = true;
                     }
                 } else {
@@ -978,6 +982,8 @@ public class BrokerController {
             RegisterBrokerResult registerBrokerResult = registerBrokerResultList.get(0);
             if (registerBrokerResult != null) {
                 if (this.updateMasterHAServerAddrPeriodically && registerBrokerResult.getHaServerAddr() != null) {
+                    // 如果broker在启动时未指定master broker地址，则会在每次向NameServer发送线条是，
+                    // 用NameServer返回的master broker地址更新主节点地址用于主从复制
                     this.messageStore.updateHaMasterAddress(registerBrokerResult.getHaServerAddr());
                 }
 

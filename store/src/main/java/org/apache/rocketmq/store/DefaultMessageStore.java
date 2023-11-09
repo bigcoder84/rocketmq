@@ -114,7 +114,7 @@ public class DefaultMessageStore implements MessageStore {
     private final ReputMessageService reputMessageService;
 
     /**
-     * 存储高可用机制
+     * 主从同步机制实现类
      */
     private final HAService haService;
 
