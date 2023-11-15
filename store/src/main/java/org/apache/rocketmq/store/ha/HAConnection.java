@@ -116,7 +116,7 @@ public class HAConnection {
          */
         private final SocketChannel socketChannel;
         /**
-         * 网络读写缓存区，默认为1MB。
+         * 网络读缓存区，默认为1MB。
          */
         private final ByteBuffer byteBufferRead = ByteBuffer.allocate(READ_MAX_BUFFER_SIZE);
         /**
@@ -201,31 +201,35 @@ public class HAConnection {
                 this.processPosition = 0;
             }
 
-            // NIO网络读的常规方法，一般使用循环的方式进行读写，
-            //直到byteBuffer中没有剩余的空间
+            // NIO网络读的常规方法，一般使用循环的方式进行读写，直到byteBuffer中没有剩余的空间
             while (this.byteBufferRead.hasRemaining()) {
                 try {
-                    // 从SocketChannel中读取数据到缓冲区
+                    // 从socketChannel读取数据到byteBufferRead中，返回读取到的字节数
                     int readSize = this.socketChannel.read(this.byteBufferRead);
                     if (readSize > 0) {
+                        // 重置readSizeZeroTimes
                         readSizeZeroTimes = 0;
+                        // 获取上次处理读事件的时间戳
                         this.lastReadTimestamp = HAConnection.this.haService.getDefaultMessageStore().getSystemClock().now();
+                        // 判断剩余可读取的字节数是否大于等于8
                         if ((this.byteBufferRead.position() - this.processPosition) >= 8) {
+                            // 获取偏移量内容的结束位置
                             int pos = this.byteBufferRead.position() - (this.byteBufferRead.position() % 8);
-                            // 如果读取的字节大于0并且本次读取到的内容大于等于
-                            //8，表明收到了从服务器一条拉取消息的请求。由于有新的从服务器反
-                            //馈拉取偏移量
+                            // 从结束位置向前读取8个字节得到从点发送的同步偏移量
                             long readOffset = this.byteBufferRead.getLong(pos - 8);
+                            // 更新处理位置
                             this.processPosition = pos;
 
-                            // 同步从服务器偏移量
+                            // 更新slaveAckOffset为从节点发送的同步进度
                             HAConnection.this.slaveAckOffset = readOffset;
+                            // 如果记录的从节点的同步进度小于0，表示还未进行同步
                             if (HAConnection.this.slaveRequestOffset < 0) {
+                                // 更新为从节点发送的同步进度
                                 HAConnection.this.slaveRequestOffset = readOffset;
                                 log.info("slave[" + HAConnection.this.clientAddr + "] request offset " + readOffset);
                             }
 
-                            // 通知由于同步等待主从复制结果而阻塞的消息发送者线程
+                            // 通知由于同步等待主从复制结果而阻塞的消息发送者处理线程
                             HAConnection.this.haService.notifyTransferSome(HAConnection.this.slaveAckOffset);
                         }
                     } else if (readSize == 0) {
@@ -307,10 +311,8 @@ public class HAConnection {
                         continue;
                     }
 
-                    // 如果nextTransferFromWhere为-1，表示初次进行数据传
-                    // 输，计算待传输的物理偏移量，如果slaveRequestOffset为0，则从当
-                    // 前CommitLog文件最大偏移量开始传输，否则根据从服务器的拉取请求
-                    // 偏移量开始传输
+                    // 如果nextTransferFromWhere为-1，表示初次进行数据传输，计算待传输的物理偏移量，如果slaveRequestOffset为0，则从当
+                    // 前CommitLog文件最大偏移量开始传输，否则根据从服务器的拉取请求偏移量开始传输
                     if (-1 == this.nextTransferFromWhere) {
                         if (0 == HAConnection.this.slaveRequestOffset) {
                             long masterOffset = HAConnection.this.haService.getDefaultMessageStore().getCommitLog().getMaxOffset();

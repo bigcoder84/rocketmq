@@ -761,17 +761,22 @@ public class CommitLog {
         // 判断是否是同步复制到从节点
         if (BrokerRole.SYNC_MASTER == this.defaultMessageStore.getMessageStoreConfig().getBrokerRole()) {
             HAService service = this.defaultMessageStore.getHaService();
+            // 如果是同步复制，也可以在发送消息时手动设置不等待同步成功就返回，这样增加了同步复制场景下的灵活性。在小部分不需要的同步复制，
+            // 但是RocketMQ又配置为主从同步复制的场景下，也使得消息异步复制
             if (messageExt.isWaitStoreMsgOK()) {
                 // Determine whether to wait
                 if (service.isSlaveOK(result.getWroteOffset() + result.getWroteBytes())) {
                     // 提交主从同步任务
                     GroupCommitRequest request = new GroupCommitRequest(result.getWroteOffset() + result.getWroteBytes());
+                    // 添加请求
                     service.putRequest(request);
+                    // 唤醒GroupTransferService中在等待的线程
                     service.getWaitNotifyObject().wakeupAll();
                     // 等待同步复制任务完成，异步同步线程复制完毕后会唤醒当前线程，超时时间默认为5s，如果超时则返回刷盘错误，刷盘成功后正常返回给调用方。
                     boolean flushOK =
                         request.waitForFlush(this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout());
                     if (!flushOK) {
+                        // 达到超时时间不再继续等待消息同步，返回错误码
                         log.error("do sync transfer other node, wait return, but failed, topic: " + messageExt.getTopic() + " tags: "
                             + messageExt.getTags() + " client address: " + messageExt.getBornHostNameString());
                         putMessageResult.setPutMessageStatus(PutMessageStatus.FLUSH_SLAVE_TIMEOUT);

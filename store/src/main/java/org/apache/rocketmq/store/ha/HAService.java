@@ -50,13 +50,22 @@ public class HAService {
 
     private final List<HAConnection> connectionList = new LinkedList<>();
 
+    /**
+     * 主从同步 主服务器监听从服务器连接实现类
+     */
     private final AcceptSocketService acceptSocketService;
 
     private final DefaultMessageStore defaultMessageStore;
 
     private final WaitNotifyObject waitNotifyObject = new WaitNotifyObject();
+    /**
+     * 传输到从节点最大偏移量
+     */
     private final AtomicLong push2SlaveMaxOffset = new AtomicLong(0);
 
+    /**
+     * 主从同步通知类，实现同步复制和异步复制的功能
+     */
     private final GroupTransferService groupTransferService;
 
     private final HAClient haClient;
@@ -89,8 +98,9 @@ public class HAService {
     }
 
     public void notifyTransferSome(final long offset) {
+        // 如果传入的偏移大于push2SlaveMaxOffset记录的值，进行更新
         for (long value = this.push2SlaveMaxOffset.get(); offset > value; ) {
-            // 如果从服务器上报的复制进度大于 本地记录的最大进度，则更新该字段
+            // 更新向从节点推送的消息最大偏移量
             boolean ok = this.push2SlaveMaxOffset.compareAndSet(value, offset);
             if (ok) {
                 this.groupTransferService.notifyTransferSome();
@@ -158,7 +168,7 @@ public class HAService {
     }
 
     /**
-     * 高可用主服务器监听从服务器连接实现类
+     * 主从同步 主服务器监听从服务器连接实现类
      * Listens to slave connections to create {@link HAConnection}.
      */
     class AcceptSocketService extends ServiceThread {
@@ -189,14 +199,16 @@ public class HAService {
          * @throws Exception If fails.
          */
         public void beginAccept() throws Exception {
+            // 创建ServerSocketChannel
             this.serverSocketChannel = ServerSocketChannel.open();
+            // 获取selector
             this.selector = RemotingUtil.openSelector();
             this.serverSocketChannel.socket().setReuseAddress(true);
             // 监听端口
             this.serverSocketChannel.socket().bind(this.socketAddressListen);
             // 设置为非阻塞模式
             this.serverSocketChannel.configureBlocking(false);
-            // 注册连接事件
+            // 注册 OP_ACCEPT （客户端连接）事件
             this.serverSocketChannel.register(this.selector, SelectionKey.OP_ACCEPT);
         }
 
@@ -318,14 +330,16 @@ public class HAService {
             synchronized (this.requestsRead) {
                 if (!this.requestsRead.isEmpty()) {
                     for (CommitLog.GroupCommitRequest req : this.requestsRead) {
-                        // 判断主从同步是否完成的依据是从服务器中已成功复制的消息最大偏移量是否大于、等于消息生产
-                        //者发送消息后消息服务端返回下一条消息的起始偏移量
+                        // 判断主从同步是否完成，判断传输到从节点最大偏移量是否超过了请求中设置的偏移量
                         boolean transferOK = HAService.this.push2SlaveMaxOffset.get() >= req.getNextOffset();
                         // 默认同步有5s的超时时间
                         long waitUntilWhen = HAService.this.defaultMessageStore.getSystemClock().now()
                             + HAService.this.defaultMessageStore.getMessageStoreConfig().getSyncFlushTimeout();
+                        // 如果从节点还未同步完毕并且未超过截止时间
                         while (!transferOK && HAService.this.defaultMessageStore.getSystemClock().now() < waitUntilWhen) {
+                            // 等待
                             this.notifyTransferObject.waitForRunning(1000);
+                            // 判断从节点同步的最大偏移量是否超过了请求中设置的偏移量
                             transferOK = HAService.this.push2SlaveMaxOffset.get() >= req.getNextOffset();
                         }
 
@@ -395,7 +409,7 @@ public class HAService {
          */
         private Selector selector;
         /**
-         * 上一次写入消息的时间戳
+         * 更新上次心跳发送时间
          */
         private long lastWriteTimestamp = System.currentTimeMillis();
         /**
@@ -434,8 +448,10 @@ public class HAService {
          * @return
          */
         private boolean isTimeToReportOffset() {
+            // 获取距离上一次主从同步的间隔时间
             long interval =
                 HAService.this.defaultMessageStore.getSystemClock().now() - this.lastWriteTimestamp;
+            // 判断是否超过了配置的发送心跳包时间间隔
             boolean needHeart = interval > HAService.this.defaultMessageStore.getMessageStoreConfig()
                 .getHaSendHeartbeatInterval();
 
@@ -453,7 +469,9 @@ public class HAService {
          */
         private boolean reportSlaveMaxOffset(final long maxOffset) {
             this.reportOffset.position(0);
+            // 设置数据传输大小为8个字节
             this.reportOffset.limit(8);
+            // 设置同步偏移量
             this.reportOffset.putLong(maxOffset);
             this.reportOffset.position(0);
             this.reportOffset.limit(8);
@@ -472,6 +490,7 @@ public class HAService {
                 }
             }
 
+            // 更新发送时间
             lastWriteTimestamp = HAService.this.defaultMessageStore.getSystemClock().now();
             return !this.reportOffset.hasRemaining();
         }
@@ -540,18 +559,25 @@ public class HAService {
         }
 
         private boolean dispatchReadRequest() {
+            // 消息头大小
             final int msgHeaderSize = 8 + 4; // phyoffset + size
             int readSocketPos = this.byteBufferRead.position();
-
+            // 开启循环不断地读取数据
             while (true) {
+                // 获可读取的字节数
                 int diff = this.byteBufferRead.position() - this.dispatchPosition;
+                // 如果字节数大于一个消息头的字节数
                 if (diff >= msgHeaderSize) {
+                    // 获取消息在master节点的物理偏移量
                     long masterPhyOffset = this.byteBufferRead.getLong(this.dispatchPosition);
+                    // 获取消息体大小
                     int bodySize = this.byteBufferRead.getInt(this.dispatchPosition + 8);
 
+                    // 获取从节点当前CommitLog的最大物理偏移量
                     long slavePhyOffset = HAService.this.defaultMessageStore.getMaxPhyOffset();
 
                     if (slavePhyOffset != 0) {
+                        // 如果不一致结束处理
                         if (slavePhyOffset != masterPhyOffset) {
                             log.error("master pushed offset not equal the max phy offset in slave, SLAVE: "
                                 + slavePhyOffset + " MASTER: " + masterPhyOffset);
@@ -559,15 +585,19 @@ public class HAService {
                         }
                     }
 
+                    // 如果可读取的字节数大于一个消息头的字节数 + 消息体大小
                     if (diff >= (msgHeaderSize + bodySize)) {
+                        // 将度缓冲区的数据转为字节数组
                         byte[] bodyData = new byte[bodySize];
+                        // 计算消息体在读缓冲区中的起始位置
                         this.byteBufferRead.position(this.dispatchPosition + msgHeaderSize);
                         this.byteBufferRead.get(bodyData);
 
-                        // 将读取到的消息，写入CommitLog中
+                        // 从读缓冲区中根据消息的位置，读取消息内容，将消息追加到从节点的CommitLog中
                         HAService.this.defaultMessageStore.appendToCommitLog(masterPhyOffset, bodyData);
 
                         this.byteBufferRead.position(readSocketPos);
+                        // 更新dispatchPosition的值为消息头大小+消息体大小
                         this.dispatchPosition += msgHeaderSize + bodySize;
 
                         if (!reportSlaveMaxOffsetPlus()) {
@@ -608,9 +638,10 @@ public class HAService {
             if (null == socketChannel) {
                 String addr = this.masterAddress.get();
                 if (addr != null) {
+                    // 将地址转为SocketAddress
                     SocketAddress socketAddress = RemotingUtil.string2SocketAddress(addr);
                     if (socketAddress != null) {
-                        // 则建立到主服务器的TCP连接
+                        // 建立与Master的连接
                         this.socketChannel = RemotingUtil.connect(socketAddress);
                         if (this.socketChannel != null) {
                             // 注册OP_READ（网络读事件）
@@ -619,10 +650,9 @@ public class HAService {
                     }
                 }
 
-                // 从节点本地的CommitLog最大偏移量
+                // 获取从节点本地的CommitLog最大偏移量
                 this.currentReportedOffset = HAService.this.defaultMessageStore.getMaxPhyOffset();
-
-                // 记录当前时间为最后写入时间
+                // 更新上次写入时间
                 this.lastWriteTimestamp = System.currentTimeMillis();
             }
 
@@ -663,9 +693,9 @@ public class HAService {
 
             while (!this.isStopped()) {
                 try {
-                    // 主动连接主服务器，获取socketChannel对象
+                    // 主动连接Master节点，获取socketChannel对象
                     if (this.connectMaster()) {
-
+                        // 是否需要报告消息同步偏移量
                         if (this.isTimeToReportOffset()) {
                             // 上报本地节点偏移量到主服务器
                             boolean result = this.reportSlaveMaxOffset(this.currentReportedOffset);
@@ -677,7 +707,7 @@ public class HAService {
                         // 进行事件选择，执行间隔时间为1s。
                         this.selector.select(1000);
 
-                        // 处理网络读请求，即处理从主服务器传回的消息数据。
+                        // 处理读事件，即处理从主服务器传回的消息数据。
                         boolean ok = this.processReadEvent();
                         if (!ok) {
                             this.closeMaster();

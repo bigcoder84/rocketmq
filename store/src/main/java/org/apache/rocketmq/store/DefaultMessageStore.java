@@ -331,7 +331,10 @@ public class DefaultMessageStore implements MessageStore {
         }
 
         if (!messageStoreConfig.isEnableDLegerCommitLog()) {
+            // 启动主从同步
             this.haService.start();
+            // 主节点启动延迟消息实现，从节点关闭Slave消息实现，主节点将延迟消息从延迟队列转移到真实的topic队列时，也会由主从同步同步至从节点，
+            // 所以不需要从节点开启延迟队列
             this.handleScheduleMessageService(messageStoreConfig.getBrokerRole());
         }
 
@@ -1594,6 +1597,7 @@ public class DefaultMessageStore implements MessageStore {
     public void handleScheduleMessageService(final BrokerRole brokerRole) {
         if (this.scheduleMessageService != null) {
             if (brokerRole == BrokerRole.SLAVE) {
+                // 如果是从节点，则关闭定时消息扫描线程
                 this.scheduleMessageService.shutdown();
             } else {
                 this.scheduleMessageService.start();
