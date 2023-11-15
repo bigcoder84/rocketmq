@@ -718,9 +718,12 @@ public class DefaultMessageStore implements MessageStore {
 
                         nextBeginOffset = offset + (i / ConsumeQueue.CQ_STORE_UNIT_SIZE);
 
+                        // diff：是 maxOffsetPy 和 maxPhyOffsetPulling 两者的差值，表示还有多少消息没有拉取
                         long diff = maxOffsetPy - maxPhyOffsetPulling;
+                        // StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE：表示当前 Master Broker 全部的物理内存大小。
                         long memory = (long) (StoreUtil.TOTAL_PHYSICAL_MEMORY_SIZE
                             * (this.messageStoreConfig.getAccessMessageInMemoryMaxRatio() / 100.0));
+                        // 如果消息堆积大于内存 40% 则建议从Slave Broker拉取消息（实现读写分离）
                         getResult.setSuggestPullingFromSlave(diff > memory);
                     } finally {
 
