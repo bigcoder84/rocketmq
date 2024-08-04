@@ -31,6 +31,7 @@
 - 定时消息代码入口：org.apache.rocketmq.store.schedule.ScheduleMessageService
 - 消息过滤代码入口：org.apache.rocketmq.store.DefaultMessageStore.getMessage、org.apache.rocketmq.broker.filter.ExpressionMessageFilter
 - 顺序消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageOrderlyService
+- 消息轨迹：org.apache.rocketmq.client.trace.hook.SendMessageTraceHookImpl、org.apache.rocketmq.client.trace.hook.ConsumeMessageTraceHookImpl
 
 > 参考文章：[RocketMQ源码分析](https://github.com/bigcoder84/study-notes/blob/master/%E5%88%86%E5%B8%83%E5%BC%8F%E4%B8%8E%E5%BE%AE%E6%9C%8D%E5%8A%A1/MessageQueue/RocketMQ/index.md)
 

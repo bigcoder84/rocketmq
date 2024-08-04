@@ -62,7 +62,7 @@ public class ConsumeMessageTraceHookImpl implements ConsumeMessageHook {
             String traceOn = msg.getProperty(MessageConst.PROPERTY_TRACE_SWITCH);
 
             if (traceOn != null && traceOn.equals("false")) {
-                // If trace switch is false ,skip it
+                // 如果未开启消息轨迹跟踪，则退出
                 continue;
             }
             TraceBean traceBean = new TraceBean();
@@ -79,6 +79,7 @@ public class ConsumeMessageTraceHookImpl implements ConsumeMessageHook {
         if (beans.size() > 0) {
             traceContext.setTraceBeans(beans);
             traceContext.setTimeStamp(System.currentTimeMillis());
+            // 异步发送消息轨迹信息至broker
             localDispatcher.append(traceContext);
         }
     }

@@ -54,22 +54,55 @@ import static org.apache.rocketmq.client.trace.TraceConstants.TRACE_INSTANCE_NAM
 public class AsyncTraceDispatcher implements TraceDispatcher {
 
     private final static InternalLogger log = ClientLogger.getLog();
+    /**
+     * 异步转发队列长度，默认为2048
+     */
     private final int queueSize;
+    /**
+     * 批量消息条数，消息轨迹一次消息发送请求包含的数据条数，默认为100，当前版本不能修改
+     */
     private final int batchSize;
+    /**
+     * 消息轨迹一次发送的最大消息大小，默认为128KB，当前版本不能修改
+     */
     private final int maxMsgSize;
+    /**
+     * 用来发送消息轨迹的消息发送者
+     */
     private final DefaultMQProducer traceProducer;
+    /**
+     * 线程池，用来异步执行消息发送
+     */
     private final ThreadPoolExecutor traceExecutor;
     // The last discard number of log
+    /**
+     * 整个运行过程中丢弃的消息轨迹数据，这里要说明一点，如果消息TPS发送过大，异步转发线程处理不过来就会主动丢弃消息轨迹数据
+     */
     private AtomicLong discardCount;
+    /**
+     * 工作线程，主要负责从追加队列中获取一批待发送的消息轨迹数据，将其提交到线程池中执行
+     */
     private Thread worker;
+    /**
+     * 消息轨迹TraceContext队列，用来存放 待发送 到服务端的Trace消息
+     */
     private ArrayBlockingQueue<TraceContext> traceContextQueue;
+    /**
+     * 线程池内部队列，默认长度为1024
+     */
     private ArrayBlockingQueue<Runnable> appenderQueue;
     private volatile Thread shutDownHook;
     private volatile boolean stopped = false;
     private DefaultMQProducerImpl hostProducer;
+    /**
+     * 消费者信息，记录消息消费时的轨迹信息
+     */
     private DefaultMQPushConsumerImpl hostConsumer;
     private volatile ThreadLocalIndex sendWhichQueue = new ThreadLocalIndex();
     private String dispatcherId = UUID.randomUUID().toString();
+    /**
+     * 用于跟踪消息轨迹的topic名称
+     */
     private String traceTopicName;
     private AtomicBoolean isStarted = new AtomicBoolean(false);
     private AccessChannel accessChannel = AccessChannel.LOCAL;
@@ -134,12 +167,14 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
     }
 
     public void start(String nameSrvAddr, AccessChannel accessChannel) throws MQClientException {
+        // 乐观锁，防止start重复执行
         if (isStarted.compareAndSet(false, true)) {
             traceProducer.setNamesrvAddr(nameSrvAddr);
             traceProducer.setInstanceName(TRACE_INSTANCE_NAME + "_" + nameSrvAddr);
             traceProducer.start();
         }
         this.accessChannel = accessChannel;
+        // 然后启动一个后台线程，其执行逻辑被封装在AsyncRunnable中
         this.worker = new Thread(new AsyncRunnable(), "MQ-AsyncTraceDispatcher-Thread-" + dispatcherId);
         this.worker.setDaemon(true);
         this.worker.start();
@@ -163,6 +198,7 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
     public boolean append(final Object ctx) {
         boolean result = traceContextQueue.offer((TraceContext) ctx);
         if (!result) {
+            // 如果入队失败，说明阻塞队列已经阻塞严重，则丢弃消息，将discardCount加1
             log.info("buffer full" + discardCount.incrementAndGet() + " ,context is " + ctx);
         }
         return result;
@@ -231,6 +267,12 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
         public void run() {
             while (!stopped) {
                 List<TraceContext> contexts = new ArrayList<TraceContext>(batchSize);
+                /**
+                 * AsyncRunnable为了提高消息的发送效率引入批量机制，即一次从
+                 * 队列中获取一批消息，然后封装成AsyncAppenderRequest任务并提交
+                 * 到线程池中异步执行，即真正的发送消息轨迹数据的逻辑被封装在
+                 * AsyncAppenderRequest的run()方法中
+                 */
                 for (int i = 0; i < batchSize; i++) {
                     TraceContext context = null;
                     try {
@@ -285,11 +327,13 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
                 if (!StringUtils.isBlank(regionId)) {
                     key = key + TraceConstants.CONTENT_SPLITOR + regionId;
                 }
+                // 按照topic将消息轨迹进行分组
                 List<TraceTransferBean> transBeanList = transBeanMap.get(key);
                 if (transBeanList == null) {
                     transBeanList = new ArrayList<TraceTransferBean>();
                     transBeanMap.put(key, transBeanList);
                 }
+                // 对消息进行编码
                 TraceTransferBean traceData = TraceDataEncoder.encoderFromContextBean(context);
                 transBeanList.add(traceData);
             }
@@ -301,6 +345,7 @@ public class AsyncTraceDispatcher implements TraceDispatcher {
                     dataTopic = key[0];
                     regionId = key[1];
                 }
+                // 批量发送消息
                 flushData(entry.getValue(), dataTopic, regionId);
             }
         }

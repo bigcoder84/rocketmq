@@ -53,6 +53,9 @@ public class BrokerConfig {
     private String messageStorePlugIn = "";
     @ImportantField
     private String msgTraceTopicName = MixAll.RMQ_SYS_TRACE_TOPIC;
+    /**
+     * 是否开启消息轨迹记录
+     */
     @ImportantField
     private boolean traceTopicEnable = false;
     /**

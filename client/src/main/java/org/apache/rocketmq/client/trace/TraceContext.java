@@ -25,8 +25,14 @@ import java.util.List;
  */
 public class TraceContext implements Comparable<TraceContext> {
 
+    /**
+     * 跟踪类型
+     */
     private TraceType traceType;
     private long timeStamp = System.currentTimeMillis();
+    /**
+     * broker所在的区域ID，取自BrokerConfig#regionId
+     */
     private String regionId = "";
     private String regionName = "";
     private String groupName = "";
@@ -34,6 +40,9 @@ public class TraceContext implements Comparable<TraceContext> {
     private boolean isSuccess = true;
     private String requestId = MessageClientIDSetter.createUniqID();
     private int contextCode = 0;
+    /**
+     * 消息具体信息
+     */
     private List<TraceBean> traceBeans;
 
     public int getContextCode() {

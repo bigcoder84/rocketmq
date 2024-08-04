@@ -17,7 +17,16 @@
 package org.apache.rocketmq.client.trace;
 
 public enum TraceType {
+    /**
+     * 消息生产轨迹
+     */
     Pub,
+    /**
+     * 消息消费前轨迹
+     */
     SubBefore,
+    /**
+     * 消息消费后轨迹
+     */
     SubAfter,
 }
