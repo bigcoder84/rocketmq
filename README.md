@@ -38,3 +38,5 @@
 
 - broker主从同步启动入口：org.apache.rocketmq.store.ha.HAService.start
   - 主服务器监听从服务器连接实现类：org.apache.rocketmq.store.ha.HAService.AcceptSocketService
+
+## 基于Raft协议的主从同步和故障切换

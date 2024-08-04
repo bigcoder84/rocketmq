@@ -34,6 +34,9 @@ import org.apache.rocketmq.store.dledger.DLedgerCommitLog;
 public class DLedgerRoleChangeHandler implements DLedgerLeaderElector.RoleChangeHandler {
 
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
+    /**
+     * 单线程线程池，目的是让所有事件一个一个按顺序执行
+     */
     private ExecutorService executorService = Executors.newSingleThreadExecutor(new ThreadFactoryImpl("DLegerRoleChangeHandler_"));
     private BrokerController brokerController;
     private DefaultMessageStore messageStore;
@@ -55,24 +58,31 @@ public class DLedgerRoleChangeHandler implements DLedgerLeaderElector.RoleChange
                     log.info("Begin handling broker role change term={} role={} currStoreRole={}", term, role, messageStore.getMessageStoreConfig().getBrokerRole());
                     switch (role) {
                         case CANDIDATE:
+                            // 变成 CANDIDATE 状态，表示正处于Leader选举阶段
                             if (messageStore.getMessageStoreConfig().getBrokerRole() != BrokerRole.SLAVE) {
+                                // 如果之前是主节点，则切换为从节点模式
                                 brokerController.changeToSlave(dLedgerCommitLog.getId());
                             }
                             break;
                         case FOLLOWER:
+                            // 变成Follower，表示Leader选举已完成
                             brokerController.changeToSlave(dLedgerCommitLog.getId());
                             break;
                         case LEADER:
+                            // 自己晋升为Leader节点，在切换到主节点之前，需要等待当前节点追加的数据都被提交后，才可以将状态变为Master
                             while (true) {
                                 if (!dLegerServer.getMemberState().isLeader()) {
                                     succ = false;
                                     break;
                                 }
                                 if (dLegerServer.getdLedgerStore().getLedgerEndIndex() == -1) {
+                                    // 表示当前节点还没有数据转发，直接跳出循环
                                     break;
                                 }
                                 if (dLegerServer.getdLedgerStore().getLedgerEndIndex() == dLegerServer.getdLedgerStore().getCommittedIndex()
                                     && messageStore.dispatchBehindBytes() == 0) {
+                                    // 如果ledgerEndIndex不为-1，则必须等待数据全部提交，即ledgerEndIndex与committedIndex必须相等，
+                                    // 并且需要等待CommitLog日志全部转发到ConsumeQueue文件中，即ReputMessageService中的reputFromOffset与CommitLog的maxOffset相等
                                     break;
                                 }
                                 Thread.sleep(100);

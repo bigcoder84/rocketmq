@@ -982,7 +982,7 @@ public class BrokerController {
             RegisterBrokerResult registerBrokerResult = registerBrokerResultList.get(0);
             if (registerBrokerResult != null) {
                 if (this.updateMasterHAServerAddrPeriodically && registerBrokerResult.getHaServerAddr() != null) {
-                    // 如果broker在启动时未指定master broker地址，则会在每次向NameServer发送线条是，
+                    // 如果broker在启动时未指定master broker地址，则会在每次向NameServer发送心跳时，
                     // 用NameServer返回的master broker地址更新主节点地址用于主从复制
                     this.messageStore.updateHaMasterAddress(registerBrokerResult.getHaServerAddr());
                 }
@@ -1147,14 +1147,21 @@ public class BrokerController {
 
     private void handleSlaveSynchronize(BrokerRole role) {
         if (role == BrokerRole.SLAVE) {
+            // 当节点是从节点时，开启定时任务从主节点同步元数据，即从节点向主节点主动同步topic的路由信息、消费进度、延迟队列处理队列、消费组订阅配置等信息
             if (null != slaveSyncFuture) {
+                // 如果当前节点的角色为从节点，且上次同步的future不为空， 则先取消
                 slaveSyncFuture.cancel(false);
             }
+            // 设置slaveSynchronize的主节点地址为空。不知大家 是否有疑问，既然节点为从节点，那为什么将主节点地址设置为空呢？
+            // 如何同步元数据，这个值会在什么时候设置呢？其实大家大可不必担心，Broker向NameServere发送心跳包的响应结果中，
+            // 包含当前该复制组的Leader节点，即主节点的地址信息。开启定时同步任务后，每10s从主节点同步一次元数据。
             this.slaveSynchronize.setMasterAddr(null);
+
             slaveSyncFuture = this.scheduledExecutorService.scheduleAtFixedRate(new Runnable() {
                 @Override
                 public void run() {
                     try {
+                        // 同步元数据
                         BrokerController.this.slaveSynchronize.syncAll();
                     }
                     catch (Throwable e) {
@@ -1167,6 +1174,7 @@ public class BrokerController {
             if (null != slaveSyncFuture) {
                 slaveSyncFuture.cancel(false);
             }
+            // 如果当前节点的角色为主节点，则取消定时同步任务并设置主节点的地址为空。
             this.slaveSynchronize.setMasterAddr(null);
         }
     }
@@ -1174,31 +1182,34 @@ public class BrokerController {
     public void changeToSlave(int brokerId) {
         log.info("Begin to change to slave brokerName={} brokerId={}", brokerConfig.getBrokerName(), brokerId);
 
-        //change the role
+        // 如果之前brokerId=0 也就是Master节点，则将brokerId改成1
         brokerConfig.setBrokerId(brokerId == 0 ? 1 : brokerId); //TO DO check
+        // 将节点角色改为SLAVE
         messageStoreConfig.setBrokerRole(BrokerRole.SLAVE);
 
         //handle the scheduled service
         try {
+            // 如果是从节点，则关闭定时消息扫描线程；如果是主节点，则打开该扫描器
             this.messageStore.handleScheduleMessageService(BrokerRole.SLAVE);
         } catch (Throwable t) {
             log.error("[MONITOR] handleScheduleMessageService failed when changing to slave", t);
         }
 
-        //handle the transactional service
         try {
+            // 关闭事务状态会查处理器
             this.shutdownProcessorByHa();
         } catch (Throwable t) {
             log.error("[MONITOR] shutdownProcessorByHa failed when changing to slave", t);
         }
 
-        //handle the slave synchronise
+        // 从节点需要启动元数据同步处理器，用于从节点向主节点主动同步topic的路由信息、消费进度、延迟队列处理队列、消费组订阅配置等信息
         handleSlaveSynchronize(BrokerRole.SLAVE);
 
         try {
+            // 立即向集群内所有NameServer告知Broker信息状态的变更。
             this.registerBrokerAll(true, true, brokerConfig.isForceRegister());
         } catch (Throwable ignored) {
-
+            // 此处忽略异常，因为此次心跳发送即使失败也没有问题，Broker会每隔30s发送发送心跳，所以NameServer是最终一致的。
         }
         log.info("Finish to change to slave brokerName={} brokerId={}", brokerConfig.getBrokerName(), brokerId);
     }
@@ -1211,37 +1222,39 @@ public class BrokerController {
         }
         log.info("Begin to change to master brokerName={}", brokerConfig.getBrokerName());
 
-        //handle the slave synchronise
+        // 关闭元数据同步器
         handleSlaveSynchronize(role);
 
-        //handle the scheduled service
         try {
+            // 打开定时消息扫描线程
             this.messageStore.handleScheduleMessageService(role);
         } catch (Throwable t) {
             log.error("[MONITOR] handleScheduleMessageService failed when changing to master", t);
         }
 
-        //handle the transactional service
         try {
+            // 开启事务状态回查处理器
             this.startProcessorByHa(BrokerRole.SYNC_MASTER);
         } catch (Throwable t) {
             log.error("[MONITOR] startProcessorByHa failed when changing to master", t);
         }
 
-        //if the operations above are totally successful, we change to master
+        // 设置brokerId=0，代表当前节点为Master
         brokerConfig.setBrokerId(0); //TO DO check
         messageStoreConfig.setBrokerRole(role);
 
         try {
+            // 立即向集群内所有NameServer告知Broker信息状态的变更。
             this.registerBrokerAll(true, true, brokerConfig.isForceRegister());
         } catch (Throwable ignored) {
-
+            // 此处忽略异常，因为此次心跳发送即使失败也没有问题，Broker会每隔30s发送发送心跳，所以NameServer是最终一致的。
         }
         log.info("Finish to change to master brokerName={}", brokerConfig.getBrokerName());
     }
 
     private void startProcessorByHa(BrokerRole role) {
         if (BrokerRole.SLAVE != role) {
+            // 该方法的作用是开启事务状态回查处理器，即当节点切换为主节点时，需要开启对应的事务状态回查处理器，对PREPARE状态的消息发起事务状态回查请求。
             if (this.transactionalMessageCheckService != null) {
                 this.transactionalMessageCheckService.start();
             }
