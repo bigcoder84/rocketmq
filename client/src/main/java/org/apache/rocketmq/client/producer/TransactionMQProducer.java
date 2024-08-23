@@ -22,6 +22,12 @@ import org.apache.rocketmq.common.message.Message;
 import org.apache.rocketmq.common.protocol.NamespaceUtil;
 import org.apache.rocketmq.remoting.RPCHook;
 
+/**
+ * TransactionMQProducer 支持事务消息的生产者，继承自 DefaultMQProducer，
+ * 在默认生产者上进行了扩展，支持发送事务消息。它拥有一个线程池 executorService
+ * 用来异步执行本地事务和回查事务，还需要注册 TransactionListener 事务监听器，
+ * 里面包含了执行本地事务和回查事务的逻辑。
+ */
 public class TransactionMQProducer extends DefaultMQProducer {
 
     /**
