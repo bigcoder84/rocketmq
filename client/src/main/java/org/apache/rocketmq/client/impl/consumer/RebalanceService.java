@@ -24,6 +24,7 @@ import org.apache.rocketmq.logging.InternalLogger;
 /**
  * 消息队列负载与重新分布机制的实现。
  * 问题一：集群内多个消费者如何负载topic下多个消息队列的呢？
+ *
  * 问题二：如果有新的消费者加入，消息队列又会如何分布？
  *
  */

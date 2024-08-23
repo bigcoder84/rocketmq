@@ -27,10 +27,17 @@
 
 - 消息消费进度存储接口：org.apache.rocketmq.client.consumer.store.OffsetStore
   - 集群模式消息消费进度存储：org.apache.rocketmq.client.consumer.store.RemoteBrokerOffsetStore
+    - 集群模式下消费进度存储在broker中
   - 广播模式消息消费进度存储： org.apache.rocketmq.client.consumer.store.LocalFileOffsetStore
+    - 广播模式下消费进度存储在消费者实例本地
 - 定时消息代码入口：org.apache.rocketmq.store.schedule.ScheduleMessageService
 - 消息过滤代码入口：org.apache.rocketmq.store.DefaultMessageStore.getMessage、org.apache.rocketmq.broker.filter.ExpressionMessageFilter
 - 顺序消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageOrderlyService
+- 事务消息代码入口：
+  - 生产者入口：org.apache.rocketmq.client.impl.producer.DefaultMQProducerImpl.sendMessageInTransaction
+  - broker处理事务消息入口：org.apache.rocketmq.broker.transaction.queue.TransactionalMessageServiceImpl.prepareMessage
+  - broker处理事务消息确认/回滚入口：org.apache.rocketmq.broker.processor.EndTransactionProcessor.processRequest
+  - broker事务状态定时回查入口：org.apache.rocketmq.broker.transaction.TransactionalMessageCheckService.onWaitEnd
 - 消息轨迹：org.apache.rocketmq.client.trace.hook.SendMessageTraceHookImpl、org.apache.rocketmq.client.trace.hook.ConsumeMessageTraceHookImpl
 
 > 参考文章：[RocketMQ源码分析](https://github.com/bigcoder84/study-notes/blob/master/%E5%88%86%E5%B8%83%E5%BC%8F%E4%B8%8E%E5%BE%AE%E6%9C%8D%E5%8A%A1/MessageQueue/RocketMQ/index.md)

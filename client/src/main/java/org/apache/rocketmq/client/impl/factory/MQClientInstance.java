@@ -87,6 +87,7 @@ import org.apache.rocketmq.remoting.protocol.RemotingCommand;
 
 /**
  * MQClientInstance封装了RocketMQ的网络处理API，是消息生产者、消息消费者与NameServer、Broker打交道的网络通道。
+ * JVM中的所有消费者、生产者持有同一个MQClientInstance，MQClientInstance只会启动一次
  */
 public class MQClientInstance {
     private final static long LOCK_TIMEOUT_MILLIS = 3000;

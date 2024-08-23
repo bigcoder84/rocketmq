@@ -129,7 +129,7 @@ public class TransactionalMessageServiceImpl implements TransactionalMessageServ
                 return;
             }
             log.debug("Check topic={}, queues={}", topic, msgQueues);
-            // 遍历每一个队列，查询需要会查事务状态的消息
+            // 遍历每一个队列，查询需要回查事务状态的消息
             for (MessageQueue messageQueue : msgQueues) {
                 long startTime = System.currentTimeMillis();
                 // 获取对应的op队列
