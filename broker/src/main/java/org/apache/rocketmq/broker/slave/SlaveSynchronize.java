@@ -50,9 +50,12 @@ public class SlaveSynchronize {
     }
 
     public void syncAll() {
+        // 同步topic配置
         this.syncTopicConfig();
+        // 同步消费进度
         this.syncConsumerOffset();
         this.syncDelayOffset();
+        // 同步消费组配置
         this.syncSubscriptionGroupConfig();
     }
 

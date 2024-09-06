@@ -51,40 +51,81 @@ import org.apache.rocketmq.store.StoreStatsService;
 import org.apache.rocketmq.store.schedule.ScheduleMessageService;
 
 /**
- * Store all metadata downtime for recovery, data protection reliability
+ * DLedgerCommitlog集成在CommitLog类中，主要实现基于DLedger的日志存储
  */
 public class DLedgerCommitLog extends CommitLog {
+
+    /**
+     * 基于Raft协议实现的集群内的一个节点，用DLedgerServer实例表示
+     */
     private final DLedgerServer dLedgerServer;
+    /**
+     * DLedger的配置信息
+     */
     private final DLedgerConfig dLedgerConfig;
+    /**
+     * DLedger基于文件映射的存储实现
+     */
     private final DLedgerMmapFileStore dLedgerFileStore;
+    /**
+     * DLedger管理的存储文件集合，对标RocketMQ中的MappedFileQueue
+     */
     private final MmapFileList dLedgerFileList;
 
-    //The id identifies the broker role, 0 means master, others means slave
+    /**
+     * 节点ID，0表示主节点，非0表示从节点
+     */
     private final int id;
 
+    /**
+     * 消息序列器
+     */
     private final MessageSerializer messageSerializer;
+    /**
+     * 用于记录消息追加的耗时（日志追加所持有锁时间）
+     */
     private volatile long beginTimeInDledgerLock = 0;
 
-    //This offset separate the old commitlog from dledger commitlog
+    /**
+     * 记录旧的CommitLog文件中的最大偏移量，如果访问的偏移量大于它，则访问Dledger管理的文件
+     */
     private long dividedCommitlogOffset = -1;
 
+    /**
+     * 是否正在恢复旧的CommitLog文件
+     */
     private boolean isInrecoveringOldCommitlog = false;
 
     public DLedgerCommitLog(final DefaultMessageStore defaultMessageStore) {
+        // 调用父类，即CommitLog的构造函数，加载${ROCKETMQ_HOME}/store/ comitlog下的CommitLog文件，即开启主从切换后需要兼容之前的消息
         super(defaultMessageStore);
+        // 构建DLedgerConfig相关配置属性
         dLedgerConfig = new DLedgerConfig();
+        // 是否强制删除文件，取自Broker配置属性cleanFileForcibly Enable，默认为true
         dLedgerConfig.setEnableDiskForceClean(defaultMessageStore.getMessageStoreConfig().isCleanFileForciblyEnable());
+        // DLedger存储类型，固定为基于文件的存储模式
         dLedgerConfig.setStoreType(DLedgerConfig.FILE);
+        // 节点的ID名称，示例配置为n0，配置要求是第二个字符后必须是数字
         dLedgerConfig.setSelfId(defaultMessageStore.getMessageStoreConfig().getdLegerSelfId());
+        // DLegergroup的名称，即一个复制组的组名称， 建议与Broker配置属性brokerName保持一致
         dLedgerConfig.setGroup(defaultMessageStore.getMessageStoreConfig().getdLegerGroup());
+        // DLegergroup中所有的节点信息，其配置显示为n0-127.0.0.1:40911; n1-127.0.0.1:40912; n2-127.0.0.1:40913。多个节点使用分号隔开
         dLedgerConfig.setPeers(defaultMessageStore.getMessageStoreConfig().getdLegerPeers());
+        // 设置DLedger日志文件的根目录，取自Borker 配件文件中的storePath RootDir，即RocketMQ的数据存储根路径
         dLedgerConfig.setStoreBaseDir(defaultMessageStore.getMessageStoreConfig().getStorePathRootDir());
+        // 设置DLedger单个日志文件的大小，取自Broker配置文件中的mapedFileSizeCommitLog
         dLedgerConfig.setMappedFileSizeForEntryData(defaultMessageStore.getMessageStoreConfig().getMappedFileSizeCommitLog());
+        // DLedger日志文件的过期删除时间，取自Broker 配置文件中的deleteWhen，默认为凌晨4点
         dLedgerConfig.setDeleteWhen(defaultMessageStore.getMessageStoreConfig().getDeleteWhen());
+        // DLedger日志文件保留时长，取自Broker 配置文件中的fileReserved Hours，默认为72h。
         dLedgerConfig.setFileReservedHours(defaultMessageStore.getMessageStoreConfig().getFileReservedTime() + 1);
         id = Integer.valueOf(dLedgerConfig.getSelfId().substring(1)) + 1;
+        // 使用DLedger相关的配置创建DLedgerServer，即每一个Broker节点为Raft集群中的一个节点，同一个复制组会使用Raft协议进行日志复制
         dLedgerServer = new DLedgerServer(dLedgerConfig);
+
         dLedgerFileStore = (DLedgerMmapFileStore) dLedgerServer.getdLedgerStore();
+        // 添加消息Append事件的处理钩子，主要是完成CommitLog 文件的物理偏移量在启用主从切换后与未开启主从切换的语义保持一致性，
+        // 即如果启用了主从切换机制，消息追加时返回的物理偏移量并不是DLedger日志条目的起始位置，而是其body字段的开始位置。
         DLedgerMmapFileStore.AppendHook appendHook = (entry, buffer, bodyOffset) -> {
             assert bodyOffset == DLedgerEntry.BODY_OFFSET;
             buffer.position(buffer.position() + bodyOffset + MessageDecoder.PHY_POS_POSITION);
@@ -98,6 +139,7 @@ public class DLedgerCommitLog extends CommitLog {
 
     @Override
     public boolean load() {
+        // DLedgerCommitLog在加载时先调用其父类CommitLog文件的load() 方法，即启用主从切换后依然会加载原CommitLog中的文件
         return super.load();
     }
 
@@ -248,31 +290,51 @@ public class DLedgerCommitLog extends CommitLog {
     }
 
     private void recover(long maxPhyOffsetOfConsumeQueue) {
+        // 加载DLedger相关的存储文件，并逐一构建对应的MmapFile。初始化三个重要的指针wrotePosition、 flushedPosition、committedPosition表示文件的大小
         dLedgerFileStore.load();
         if (dLedgerFileList.getMappedFiles().size() > 0) {
+            // 如果已存在DLedger的数据文件，则只需要恢复DLedger 相关的数据文件，因为在加载旧的CommitLog文件时已经将重要的数据指针设置为最大值
+
+            // 调用DLedger文件存储实现类DLedgerFileStore的recover()方法，恢复管辖的MMapFile对象（一个文件对应一个MMapFile实例）的相关指针，
+            // 其实现方法与RocketMQ的DefaultMessageStore恢复过程类似。
             dLedgerFileStore.recover();
+
+            // 设置dividedCommitlogOffset的值为DLedger中物理文件的最小偏移量。消息的物理偏移量如果小于该值，则从CommitLog文件中查找消息，
+            // 消息的物理偏移量如果大于或等于该值，则从DLedger相关的文件中查找消息
             dividedCommitlogOffset = dLedgerFileList.getFirstMappedFile().getFileFromOffset();
+
+            // 如果存在旧的CommitLog文件，则禁止删除DLedger文件，具体做法就是禁止强制删除文件，并将文件的有效存储时间设置为10年。
             MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
             if (mappedFile != null) {
                 disableDeleteDledger();
             }
+
+            // 如果ConsumeQueue中存储的最大物理偏移量大于DLedger中最大的物理偏移量，则删除多余的ConsumeQueue文件
             long maxPhyOffset = dLedgerFileList.getMaxWrotePosition();
             // Clear ConsumeQueue redundant data
             if (maxPhyOffsetOfConsumeQueue >= maxPhyOffset) {
-                log.warn("[TruncateCQ]maxPhyOffsetOfConsumeQueue({}) >= processOffset({}), truncate dirty logic files", maxPhyOffsetOfConsumeQueue, maxPhyOffset);
+                log.warn("[TruncateCQ]maxPhyOffsetOfConsumeQueue({}) >= processOffset({}), truncate dirty logic files",
+                        maxPhyOffsetOfConsumeQueue, maxPhyOffset);
                 this.defaultMessageStore.truncateDirtyLogicFiles(maxPhyOffset);
             }
+            // 如果已存在DLedger的数据文件，只需要恢复DLedger 相关的数据文件，直接返回
             return;
         }
+        // 从这里开始，只针对开启主从切换并且是初次启动（并没有生成DLedger相关的数据文件）的相关流程，
+        // 调用CommitLog 的recoverNormally文件恢复旧的CommitLog文件
         //Indicate that, it is the first time to load mixed commitlog, need to recover the old commitlog
         isInrecoveringOldCommitlog = true;
         //No need the abnormal recover
         super.recoverNormally(maxPhyOffsetOfConsumeQueue);
         isInrecoveringOldCommitlog = false;
+        // 获取最后一个CommitLog文件
         MappedFile mappedFile = this.mappedFileQueue.getLastMappedFile();
         if (mappedFile == null) {
+            // 如果不存在旧的CommitLog文件，直接结束日志文件的恢复流程
             return;
         }
+        // 从最后一个文件的最后写入点（原CommitLog文件的待写入位 点），尝试查找写入的魔数，
+        // 如果存在魔数并等于CommitLog.BLANK_MAGIC_CODE，则无须写入魔数，在升级DLedger第一次启动时，魔数为空，故需要写入魔数
         ByteBuffer byteBuffer = mappedFile.sliceByteBuffer();
         byteBuffer.position(mappedFile.getWrotePosition());
         boolean needWriteMagicCode = true;
@@ -285,14 +347,20 @@ public class DLedgerCommitLog extends CommitLog {
             log.info("Recover old commitlog found a illegal magic code={}", magicCode);
         }
         dLedgerConfig.setEnableDiskForceClean(false);
+        // 初始化dividedCommitlogOffset，等于最后一个文件的起始偏移量加上文件的大小，即该指针指向最后一个文件的结束位置。
         dividedCommitlogOffset = mappedFile.getFileFromOffset() + mappedFile.getFileSize();
-        log.info("Recover old commitlog needWriteMagicCode={} pos={} file={} dividedCommitlogOffset={}", needWriteMagicCode, mappedFile.getFileFromOffset() + mappedFile.getWrotePosition(), mappedFile.getFileName(), dividedCommitlogOffset);
+        log.info("Recover old commitlog needWriteMagicCode={} pos={} file={} dividedCommitlogOffset={}",
+                needWriteMagicCode, mappedFile.getFileFromOffset() + mappedFile.getWrotePosition(),
+                mappedFile.getFileName(), dividedCommitlogOffset);
         if (needWriteMagicCode) {
+            // 将最后一个未写满数据的CommitLog文件全部写满，其方法为设置消息体的大小与魔数。
             byteBuffer.position(mappedFile.getWrotePosition());
             byteBuffer.putInt(mappedFile.getFileSize() - mappedFile.getWrotePosition());
             byteBuffer.putInt(BLANK_MAGIC_CODE);
             mappedFile.flush(0);
         }
+        // 设置最后一个文件的wrotePosition、flushedPosition、committedPosition为文件的大小，
+        // 同样意味着最后一个文件已经写满，下一条消息将写入DLedger。
         mappedFile.setWrotePosition(mappedFile.getFileSize());
         mappedFile.setCommittedPosition(mappedFile.getFileSize());
         mappedFile.setFlushedPosition(mappedFile.getFileSize());
@@ -414,10 +482,15 @@ public class DLedgerCommitLog extends CommitLog {
             request.setGroup(dLedgerConfig.getGroup());
             request.setRemoteId(dLedgerServer.getMemberState().getSelfId());
             request.setBody(encodeResult.data);
+            // DLedger模式下不在写入RocketMQ自带的CommitLog，而是调用DLedgerServer的handleAppend进行消息追加，然后将消息实时转发到从节点，
+            // 只有超过集群内的半数节点成功写入消息后才会返回写入成 功。如果追加成功，将返回本次追加成功后的起始偏移量，即pos属性，类似RocketMQ中CommitLog文件的物理偏移量。
             dledgerFuture = (AppendFuture<AppendEntryResponse>) dLedgerServer.handleAppend(request);
             if (dledgerFuture.getPos() == -1) {
                 return new PutMessageResult(PutMessageStatus.OS_PAGECACHE_BUSY, new AppendMessageResult(AppendMessageStatus.UNKNOWN_ERROR));
             }
+            // 根据DLedger的起始偏移量计算真正的消息物理偏移量。DLedger自身有存储协议，body字段存储真实的消息，即CommitLog条目的存储结构，
+            // 返回给客户端的消息偏移量为body字段的开始偏移量，即通过putMessage返回的物理偏移量与不使用Dledger方式返回的物理偏移量含义是一样的。
+            // 从偏移量开始，可以正确读取消息，这样DLedger就完美地兼容了RocketMQ CommitLog
             long wroteOffset = dledgerFuture.getPos() + DLedgerEntry.BODY_OFFSET;
 
             int msgIdLength = (msg.getSysFlag() & MessageSysFlag.STOREHOSTADDRESS_V6_FLAG) == 0 ? 4 + 4 + 8 : 16 + 4 + 8;
@@ -492,6 +565,7 @@ public class DLedgerCommitLog extends CommitLog {
     @Override
     public SelectMappedBufferResult getMessage(final long offset, final int size) {
         if (offset < dividedCommitlogOffset) {
+            // 如果查找的消息小于 dividedCommitlogOffset，则从原先的CommitLog文件中查找
             return super.getMessage(offset, size);
         }
         int mappedFileSize = this.dLedgerServer.getdLedgerConfig().getMappedFileSizeForEntryData();
