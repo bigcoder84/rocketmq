@@ -33,10 +33,26 @@ import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 import org.apache.rocketmq.remoting.protocol.RemotingSerializable;
 
+/**
+ * broker端消息消费进度管理类
+ *
+ * 消费者client每次拉取消息时都会在请求头中携带其本地的消费进度，
+ * broker收到拉取请求后会调用 commitOffset 方法更新broker的消费进度
+ *
+ * 消费者Client，携带本地消费进度拉取消息的入口：org.apache.rocketmq.client.impl.consumer.DefaultMQPushConsumerImpl#pullMessage(org.apache.rocketmq.client.impl.consumer.PullRequest)
+ * broker处理拉取请求，并存储消费进度的入口：org.apache.rocketmq.broker.processor.PullMessageProcessor#processRequest(io.netty.channel.Channel,
+ * org.apache.rocketmq.remoting.protocol.RemotingCommand, boolean)
+ *
+ * broker存储消费进度的思路和客户端类似，先将消费进度存储在内存中，然后通过JOB每隔10s调用
+ * ConfigManager#persist() 刷盘，broker在启动时会创建这个JOB：org.apache.rocketmq.broker.BrokerController#initialize()
+ */
 public class ConsumerOffsetManager extends ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.BROKER_LOGGER_NAME);
     private static final String TOPIC_GROUP_SEPARATOR = "@";
 
+    /**
+     * 消息消费进度，
+     */
     private ConcurrentMap<String/* topic@group */, ConcurrentMap<Integer, Long>> offsetTable =
         new ConcurrentHashMap<String, ConcurrentMap<Integer, Long>>(512);
 

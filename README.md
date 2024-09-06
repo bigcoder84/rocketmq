@@ -25,11 +25,13 @@
 
 ![](./images/RocketMQ消息拉取和消费流程.png)
 
-- 消息消费进度存储接口：org.apache.rocketmq.client.consumer.store.OffsetStore
-  - 集群模式消息消费进度存储：org.apache.rocketmq.client.consumer.store.RemoteBrokerOffsetStore
-    - 集群模式下消费进度存储在broker中
-  - 广播模式消息消费进度存储： org.apache.rocketmq.client.consumer.store.LocalFileOffsetStore
-    - 广播模式下消费进度存储在消费者实例本地
+- 消息消费进度
+  - client端存储接口：org.apache.rocketmq.client.consumer.store.OffsetStore
+    - 集群模式消息消费进度存储：org.apache.rocketmq.client.consumer.store.RemoteBrokerOffsetStore
+      - 集群模式下消费进度存储在broker中
+    - 广播模式消息消费进度存储： org.apache.rocketmq.client.consumer.store.LocalFileOffsetStore
+      - 广播模式下消费进度存储在消费者实例本地
+  - broker端存储接口：org.apache.rocketmq.broker.offset.ConsumerOffsetManager
 - 定时消息代码入口：org.apache.rocketmq.store.schedule.ScheduleMessageService
 - 消息过滤代码入口：org.apache.rocketmq.store.DefaultMessageStore.getMessage、org.apache.rocketmq.broker.filter.ExpressionMessageFilter
 - 顺序消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageOrderlyService

@@ -21,6 +21,9 @@ import org.apache.rocketmq.common.constant.LoggerName;
 import org.apache.rocketmq.logging.InternalLogger;
 import org.apache.rocketmq.logging.InternalLoggerFactory;
 
+/**
+ * 元数据管理抽象实现类，内部定义着如何从本地磁盘加载配置，以及如何将内存中的配置写入磁盘
+ */
 public abstract class ConfigManager {
     private static final InternalLogger log = InternalLoggerFactory.getLogger(LoggerName.COMMON_LOGGER_NAME);
 
