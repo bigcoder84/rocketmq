@@ -90,6 +90,14 @@ public class PullMessageProcessor implements NettyRequestProcessor {
         return false;
     }
 
+    /**
+     * 处理消息拉取请求
+     * @param channel 请求对应网络连接通道
+     * @param request 请求的内容
+     * @param brokerAllowSuspend Broker端是否支持挂起，处理消息拉取时默认传入true，表示如果未找到消息则挂起，如果该参数为false，未找到消息时直接返回客户端消息未找到。
+     * @return
+     * @throws RemotingCommandException
+     */
     private RemotingCommand processRequest(final Channel channel, RemotingCommand request, boolean brokerAllowSuspend)
         throws RemotingCommandException {
         RemotingCommand response = RemotingCommand.createResponseCommand(PullMessageResponseHeader.class);
@@ -124,6 +132,7 @@ public class PullMessageProcessor implements NettyRequestProcessor {
             return response;
         }
 
+        // 客户端传过来的是否支持挂起，默认为true
         final boolean hasSuspendFlag = PullSysFlag.hasSuspendFlag(requestHeader.getSysFlag());
         final boolean hasCommitOffsetFlag = PullSysFlag.hasCommitOffsetFlag(requestHeader.getSysFlag());
         final boolean hasSubscriptionFlag = PullSysFlag.hasSubscriptionFlag(requestHeader.getSysFlag());
@@ -569,12 +578,14 @@ public class PullMessageProcessor implements NettyRequestProcessor {
             @Override
             public void run() {
                 try {
+                    // 拉取磁盘消息，并生成response
                     final RemotingCommand response = PullMessageProcessor.this.processRequest(channel, request, false);
 
                     if (response != null) {
                         response.setOpaque(request.getOpaque());
                         response.markResponseType();
                         try {
+                            // 将response写入连接channel中
                             channel.writeAndFlush(response).addListener(new ChannelFutureListener() {
                                 @Override
                                 public void operationComplete(ChannelFuture future) throws Exception {

@@ -158,7 +158,7 @@ public class RebalancePushImpl extends RebalanceImpl {
             case CONSUME_FROM_MIN_OFFSET:
             case CONSUME_FROM_MAX_OFFSET:
             case CONSUME_FROM_LAST_OFFSET: {
-                // 集群模式下获取broker中的消费进度
+                // 集群模式下获取broker中的消费进度、广播模式下从本地读取消费进度
                 long lastOffset = offsetStore.readOffset(mq, ReadOffsetType.READ_FROM_STORE);
                 if (lastOffset >= 0) {
                     result = lastOffset;

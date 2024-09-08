@@ -24,6 +24,7 @@
 - 消息消费代码入口：org.apache.rocketmq.client.impl.consumer.ConsumeMessageConcurrentlyService.ConsumeRequest.run
 
 ![](./images/RocketMQ消息拉取和消费流程.png)
+![](./images/RocketMQ的消息拉取与消费模式.png)
 
 - 消息消费进度
   - client端存储接口：org.apache.rocketmq.client.consumer.store.OffsetStore

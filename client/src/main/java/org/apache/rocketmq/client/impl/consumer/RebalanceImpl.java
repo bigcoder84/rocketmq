@@ -227,6 +227,7 @@ public abstract class RebalanceImpl {
     }
 
     public void doRebalance(final boolean isOrder) {
+        // 一个consumerGroup可以同时消费多个topic，所以此处返回的是一个Map，key 是 topic 名称
         Map<String, SubscriptionData> subTable = this.getSubscriptionInner();
         if (subTable != null) {
             for (final Map.Entry<String, SubscriptionData> entry : subTable.entrySet()) {
@@ -396,7 +397,7 @@ public abstract class RebalanceImpl {
                     log.warn("doRebalance, {}, add a new mq failed, {}, because lock failed", consumerGroup, mq);
                     continue;
                 }
-                // 从内存中移除消息进度
+                // 从内存中移除消息进度（脏数据）
                 this.removeDirtyOffset(mq);
                 ProcessQueue pq = new ProcessQueue();
                 // 计算消息消费的起始偏移量
