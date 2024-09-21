@@ -24,18 +24,19 @@ import org.apache.rocketmq.client.consumer.listener.MessageListenerConcurrently;
 import org.apache.rocketmq.client.exception.MQClientException;
 import org.apache.rocketmq.common.consumer.ConsumeFromWhere;
 import org.apache.rocketmq.common.message.MessageExt;
+import org.apache.rocketmq.common.protocol.heartbeat.MessageModel;
 
 /**
  * This example shows how to subscribe and consume messages using providing {@link DefaultMQPushConsumer}.
  */
-public class Consumer {
+public class BroadcastConsumer {
 
     public static void main(String[] args) throws InterruptedException, MQClientException {
 
         /*
          * Instantiate with specified consumer group name.
          */
-        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("TopicTest-Consumer");
+        DefaultMQPushConsumer consumer = new DefaultMQPushConsumer("TopicTest-Broadcast-Consumer");
 
         /*
          * Specify name server addresses.
@@ -53,7 +54,8 @@ public class Consumer {
          * Specify where to start in case the specified consumer group is a brand new one.
          */
         consumer.setConsumeFromWhere(ConsumeFromWhere.CONSUME_FROM_FIRST_OFFSET);
-
+        // 设置为广播消费模式
+        consumer.setMessageModel(MessageModel.BROADCASTING);
         /*
          * Subscribe one more more topics to consume.
          */

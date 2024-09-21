@@ -140,6 +140,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
             return response;
         }
 
+        // 如果重试队列数量小于等于0，则直接返回成功，说明该消费组不支持重试。
         if (subscriptionGroupConfig.getRetryQueueNums() <= 0) {
             response.setCode(ResponseCode.SUCCESS);
             response.setRemark(null);
@@ -214,6 +215,7 @@ public class SendMessageProcessor extends AbstractSendMessageProcessor implement
                 delayLevel = 3 + msgExt.getReconsumeTimes();
             }
 
+            // 设置延时级别
             msgExt.setDelayTimeLevel(delayLevel);
         }
 

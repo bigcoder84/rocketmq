@@ -25,12 +25,25 @@ import org.apache.rocketmq.remoting.annotation.CFNotNull;
 import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class UpdateConsumerOffsetRequestHeader implements CommandCustomHeader {
+
+    /**
+     * 更新的消费组
+     */
     @CFNotNull
     private String consumerGroup;
+    /**
+     * 主题名称
+     */
     @CFNotNull
     private String topic;
+    /**
+     * 队列ID
+     */
     @CFNotNull
     private Integer queueId;
+    /**
+     * 更新的消费进度
+     */
     @CFNotNull
     private Long commitOffset;
 

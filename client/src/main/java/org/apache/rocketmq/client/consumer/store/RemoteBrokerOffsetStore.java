@@ -38,6 +38,13 @@ import org.apache.rocketmq.remoting.exception.RemotingException;
 
 /**
  * 消费进度存储的远程实现。集群消费模式下使用该实现。
+ *
+ * 集群消费模式，当 `RebalanceService` 将 `MessageQueue` 负载到当前客户端时，会调用
+ * `org.apache.rocketmq.client.impl.consumer.RebalancePushImpl#computePullFromWhere`
+ * 方法从broker中获取当前 `MessageQueue` 的消费进度
+ *
+ * RemoteBrokerOffsetStore 会把从broker查询到的消费进度进行缓存，其余时间客户端查询和更新消费进度都是基于内存中的数据，
+ * 而消费进度的持久化同样是通过定时任务（默认每5s）调用 `RemoteBrokerOffsetStore#persistAll` 将内存中的消费进度通过网络请求写入broker磁盘。
  * Remote storage implementation
  */
 public class RemoteBrokerOffsetStore implements OffsetStore {
@@ -92,8 +99,10 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
                 }
                 case READ_FROM_STORE: {
                     try {
+                        // 从broker获取指定MessageQueue当前消费组的消费进度
                         long brokerOffset = this.fetchConsumeOffsetFromBroker(mq);
                         AtomicLong offset = new AtomicLong(brokerOffset);
+                        // 更新内存中的消费进度
                         this.updateOffset(mq, offset.get(), false);
                         return brokerOffset;
                     }
@@ -115,6 +124,10 @@ public class RemoteBrokerOffsetStore implements OffsetStore {
         return -1;
     }
 
+    /**
+     *
+     * @param mqs
+     */
     @Override
     public void persistAll(Set<MessageQueue> mqs) {
         if (null == mqs || mqs.isEmpty())

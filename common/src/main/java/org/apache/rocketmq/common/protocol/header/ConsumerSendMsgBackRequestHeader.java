@@ -24,10 +24,13 @@ import org.apache.rocketmq.remoting.exception.RemotingCommandException;
 
 public class ConsumerSendMsgBackRequestHeader implements CommandCustomHeader {
     /**
-     * 消息物理偏移量
+     * 消息物理偏移量，因为需要重试的消息在Broker中本来就有，所以发送重试消息只需要发送消息的物理偏移量即可
      */
     @CFNotNull
     private Long offset;
+    /**
+     * 消费组名
+     */
     @CFNotNull
     private String group;
     /**
@@ -37,15 +40,18 @@ public class ConsumerSendMsgBackRequestHeader implements CommandCustomHeader {
     @CFNotNull
     private Integer delayLevel;
     /**
-     * 消息ID
+     * 原消息的消息ID
      */
     private String originMsgId;
     /**
-     * 消息topic
+     * 原消息的topic
      */
     private String originTopic;
     @CFNullable
     private boolean unitMode = false;
+    /**
+     * 最大重新消费次数，默认16次。
+     */
     private Integer maxReconsumeTimes;
 
     @Override
